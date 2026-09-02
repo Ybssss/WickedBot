@@ -10,7 +10,7 @@
    4. Set Script Properties (gear icon):
       TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, ADMIN_IDS, AUTO_REPLY, CONFESSION_CHANNEL_ID
    5. Deploy -> New deployment -> Web app -> Anyone -> Deploy. Copy URL.
-   6. Open editor dropdown -> select 'registerCommands_': Run (one-time).
+   6. Open editor dropdown -> select 'registerCOMMANDS': Run (one-time).
    7. DM bot /start -> should respond. /help -> command list.
 
    WARNING: the user pasted their real Gemini API key in this chat. The key is
@@ -26,7 +26,7 @@ const BOT_VERSION = '1.0.0';
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const TELEGRAM_API_BASE_ = 'https://api.telegram.org';
 
-function getConfig_() {
+function getConfig() {
   const props = PropertiesService.getScriptProperties();
   const token = props.getProperty('TELEGRAM_BOT_TOKEN');
   if (!token) throw new Error('Missing TELEGRAM_BOT_TOKEN in Script Properties');
@@ -38,36 +38,36 @@ function getConfig_() {
   return { token: token, geminiKey: geminiKey, model: model, channelId: channelId, adminIds: adminIds, version: BOT_VERSION };
 }
 
-function getAdminIds() { return getConfig_().adminIds; }
-function getChannelId() { return getConfig_().channelId; }
+function getAdminIds() { return getConfig().adminIds; }
+function getChannelId() { return getConfig().channelId; }
 function setChannelId(id) { PropertiesService.getScriptProperties().setProperty('CONFESSION_CHANNEL_ID', String(id)); }
-function isAdmin_(userId) { if (userId === null || userId === undefined) return false; return getAdminIds().has(Number(userId)); }
+function isAdmin(userId) { if (userId === null || userId === undefined) return false; return getAdminIds().has(Number(userId)); }
 
 /* --- HTML ESCAPE --- */
-function escapeHtml_(s) {
+function escapeHtml(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /* --- WEBHOOK & COMMAND REGISTRATION --- */
 function setupWebhook() {
-  const cfg = getConfig_();
+  const cfg = getConfig();
   const url = ScriptApp.getService().getUrl();
   if (!url) throw new Error('setupWebhook: deploy as web app first');
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/setWebhook?url=' + encodeURIComponent(url) + '&drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'get', muteHttpExceptions: false });
   console.log('setupWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText());
-  registerCommands_();
+  registerCOMMANDS();
 }
 
 function deleteWebhook() {
-  const cfg = getConfig_();
+  const cfg = getConfig();
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/deleteWebhook?drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'post', muteHttpExceptions: true });
   console.log('deleteWebhook: ' + resp.getContentText());
 }
 
-function registerCommands_() {
-  const cfg = getConfig_();
+function registerCommands() {
+  const cfg = getConfig();
   const commands = [
     { command: 'start', description: 'Show welcome message' },
     { command: 'help', description: 'List all commands' },
@@ -81,15 +81,15 @@ function registerCommands_() {
     method: 'post', contentType: 'application/json',
     payload: JSON.stringify({ commands: commands }), muteHttpExceptions: true
   });
-  console.log('registerCommands_: ' + resp.getResponseCode() + ' ' + resp.getContentText());
+  console.log('registerCOMMANDS: ' + resp.getResponseCode() + ' ' + resp.getContentText());
 }
 
 /* --- MESSAGE SENDER WITH REPLY SUPPORT --- */
 function sendMessage(chatId, text, opts) {
   if (!opts) opts = {};
   const safeText = String(text || '');
-  const cfg = getConfig_();
-  const chunks = chunkText_(safeText, 4000);
+  const cfg = getConfig();
+  const chunks = chunkText(safeText, 4000);
   const replyToMessageId = (opts && opts.replyToMessageId !== undefined && opts.replyToMessageId !== null) ? opts.replyToMessageId : undefined;
   let lastResponse = null;
 
@@ -113,7 +113,7 @@ function sendMessage(chatId, text, opts) {
   return lastResponse;
 }
 
-function chunkText_(text, maxLen) {
+function chunkText(text, maxLen) {
   const chunks = [];
   let current = '';
   const lines = String(text).split('\n');
@@ -127,15 +127,15 @@ function chunkText_(text, maxLen) {
 }
 
 /* --- GEMINI --- */
-var GEMINI_API_BASE_ = 'https://generativelanguage.googleapis.com/v1beta/models';
+var GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 function generateComment(topic, context) {
   const fallback = 'I had nothing to say for once.';
   if (!topic || typeof topic !== 'string') return fallback;
-  const cfg = getConfig_();
+  const cfg = getConfig();
   if (!cfg || !cfg.geminiKey || !cfg.model) { console.error('generateComment: missing config'); return fallback; }
-  const safeTopic = truncate_(topic, 500);
-  const safeContext = truncate_(context || 'none', 500);
-  const url = GEMINI_API_BASE_ + '/' + encodeURIComponent(cfg.model) + ':generateContent?key=' + encodeURIComponent(cfg.geminiKey);
+  const safeTopic = truncateText(topic, 500);
+  const safeContext = truncateText(context || 'none', 500);
+  const url = GEMINI_API_BASE + '/' + encodeURIComponent(cfg.model) + ':generateContent?key=' + encodeURIComponent(cfg.geminiKey);
   const systemPrompt = 'You are an anonymous, witty participant in a college-style confession channel. ' +
     'Someone just posted or asked about a topic, and you are leaving a short comment in the thread. ' +
     'Write ONE short comment (1-3 sentences, max 800 characters). Be casual, specific when given context, clever. ' +
@@ -169,10 +169,10 @@ function generateComment(topic, context) {
   return fallback;
 }
 function generateRoast(target, context) { return generateComment(target, context); }
-function truncate_(s, max) { const str = String(s || ''); return str.length > max ? str.substring(0, max) : str; }
+function truncateText(s, max) { const str = String(s || ''); return str.length > max ? str.substring(0, max) : str; }
 
 /* --- COMMAND HANDLERS --- */
-const COMMANDS_ = [
+const COMMANDS = [
   { name: 'start', description: 'Show a welcome message.' },
   { name: 'help', description: 'List all commands.' },
   { name: 'comment', description: 'Generate a witty comment. Usage: /comment <text>' },
@@ -181,44 +181,44 @@ const COMMANDS_ = [
   { name: 'setchannel', description: 'Admin only. Usage: /setchannel <channel_id>' }
 ];
 
-function cmdStart_(msg) {
+function cmdStart(msg) {
   sendMessage(msg.chat.id, '<b>CommentBot</b>\n\nI comment on confessions in the channel.\n\nType /help.');
 }
 
-function cmdHelp_(msg) {
+function cmdHelp(msg) {
   const lines = ['<b>Available commands</b>\n'];
-  for (let i = 0; i < COMMANDS_.length; i++) { lines.push('/' + COMMANDS_[i].name + ' &mdash; ' + escapeHtml_(COMMANDS_[i].description)); }
+  for (let i = 0; i < COMMANDS.length; i++) { lines.push('/' + COMMANDS[i].name + ' &mdash; ' + escapeHtml(COMMANDS[i].description)); }
   lines.push('\nAdmins can also use /setchannel to configure the channel.');
   const on = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
   if (on) lines.push('\nAuto-reply is <b>on</b> &mdash; the bot comments on every new channel post.');
   sendMessage(msg.chat.id, lines.join('\n'));
 }
 
-function cmdComment_(msg, args) {
+function cmdComment(msg, args) {
   const topic = (args || '').trim();
   if (!topic) { sendMessage(msg.chat.id, 'What topic? Usage: <code>/comment &lt;text&gt;</code>'); return; }
-  if (checkRateLimit_(msg.from.id, 'comment')) { sendMessage(msg.chat.id, 'Slow down. Try again in a minute.'); return; }
+  if (checkRateLimit(msg.from.id, 'comment')) { sendMessage(msg.chat.id, 'Slow down. Try again in a minute.'); return; }
   const ch = getChannelId();
   if (!ch) { sendMessage(msg.chat.id, 'No channel configured yet. /setchannel <id>'); return; }
-  let c; try { c = generateComment(topic, ''); } catch (e) { console.error('cmdComment_:', e); sendMessage(msg.chat.id, 'Brain short-circuited. Try again.'); return; }
+  let c; try { c = generateComment(topic, ''); } catch (e) { console.error('cmdComment:', e); sendMessage(msg.chat.id, 'Brain short-circuited. Try again.'); return; }
   if (!c || c.trim().length === 0) { sendMessage(msg.chat.id, 'I came up blank. Try a different topic.'); return; }
-  postCommentToChannel_(c);
+  postCommentToChannel(c);
   sendMessage(msg.chat.id, 'Posted a comment to the channel.');
 }
 
-function cmdRoast_(msg, args) { return cmdComment_(msg, args); }
+function cmdRoast(msg, args) { return cmdComment(msg, args); }
 
-function cmdConfess_(msg, args) {
+function cmdConfess(msg, args) {
   const text = (args || '').trim();
   if (!text) { sendMessage(msg.chat.id, 'What is the confession? Usage: <code>/confess &lt;message&gt;</code>'); return; }
-  if (checkRateLimit_(msg.from.id, 'confess')) { sendMessage(msg.chat.id, 'Slow down. Try again in a minute.'); return; }
+  if (checkRateLimit(msg.from.id, 'confess')) { sendMessage(msg.chat.id, 'Slow down. Try again in a minute.'); return; }
   const ch = getChannelId();
   if (!ch) { sendMessage(msg.chat.id, 'No channel configured. /setchannel <id>'); return; }
-  const leadIn = '<b>Anonymous confession:</b>\n\n' + escapeHtml_(text);
-  const resp = postToChannelWithResult_(ch, leadIn);
+  const leadIn = '<b>Anonymous confession:</b>\n\n' + escapeHtml(text);
+  const resp = postToChannelWithResult(ch, leadIn);
   if (!resp || !resp.ok) { sendMessage(msg.chat.id, 'Could not post. Check bot permissions in the channel.'); return; }
   const confId = (resp.result && resp.result.message_id) ? resp.result.message_id : null;
-  let comment; try { comment = generateComment(text, ''); } catch (e) { console.error('cmdConfess_:', e); }
+  let comment; try { comment = generateComment(text, ''); } catch (e) { console.error('cmdConfess:', e); }
   if (comment && comment.trim().length > 0) {
     if (confId) sendMessage(ch, '<b>Comment:</b>\n\n' + comment, { replyToMessageId: confId });
     else sendMessage(ch, '<b>Comment:</b>\n\n' + comment);
@@ -226,7 +226,7 @@ function cmdConfess_(msg, args) {
   sendMessage(msg.chat.id, 'Posted anonymously. And I had thoughts.');
 }
 
-function cmdReply_(msg, args) {
+function cmdReply(msg, args) {
   const raw = (args || '').trim();
   if (!raw) { sendMessage(msg.chat.id, 'Usage: <code>/reply &lt;message_id&gt; [hint]</code>'); return; }
   const spaceIdx = raw.search(/\s/);
@@ -237,28 +237,28 @@ function cmdReply_(msg, args) {
   if (!ch) { sendMessage(msg.chat.id, 'No channel configured. /setchannel <id>'); return; }
   const topic = hint || ('in response to post #' + idStr);
   const context = hint ? ('Replying to message #' + idStr + '. ' + hint) : ('Replying to message #' + idStr + ' without original text; comment generally.');
-  let c; try { c = generateComment(topic, context); } catch (e) { console.error('cmdReply_:', e); sendMessage(msg.chat.id, 'Brain short-circuited. Try again.'); return; }
+  let c; try { c = generateComment(topic, context); } catch (e) { console.error('cmdReply:', e); sendMessage(msg.chat.id, 'Brain short-circuited. Try again.'); return; }
   if (!c || c.trim().length === 0) { sendMessage(msg.chat.id, 'Came up blank. Try a different hint.'); return; }
   const resp = sendMessage(ch, '<b>Comment on #' + idStr + ':</b>\n\n' + c, { replyToMessageId: Number(idStr) });
   if (resp && resp.ok) sendMessage(msg.chat.id, 'Comment posted as reply to post #' + idStr + '.');
   else sendMessage(msg.chat.id, 'Could not post reply. Check bot permissions and message id.');
 }
 
-function cmdSetChannel_(msg, args) {
-  if (!isAdmin_(msg.from.id)) { sendMessage(msg.chat.id, 'Admin only.'); return; }
+function cmdSetChannel(msg, args) {
+  if (!isAdmin(msg.from.id)) { sendMessage(msg.chat.id, 'Admin only.'); return; }
   const requested = (args || '').trim();
   if (!requested) {
     const current = getChannelId();
-    sendMessage(msg.chat.id, (current ? 'Current channel: <code>' + escapeHtml_(current) + '</code>' : 'No channel set. Usage: <code>/setchannel &lt;id&gt;</code>'));
+    sendMessage(msg.chat.id, (current ? 'Current channel: <code>' + escapeHtml(current) + '</code>' : 'No channel set. Usage: <code>/setchannel &lt;id&gt;</code>'));
     return;
   }
-  const test = postToChannel_(requested, '<b>Bot connected.</b>');
-  if (!test) { sendMessage(msg.chat.id, 'Could not send to channel ' + escapeHtml_(requested) + '. Make sure bot is admin with Post Messages.'); return; }
+  const test = postToChannel(requested, '<b>Bot connected.</b>');
+  if (!test) { sendMessage(msg.chat.id, 'Could not send to channel ' + escapeHtml(requested) + '. Make sure bot is admin with Post Messages.'); return; }
   setChannelId(requested);
-  sendMessage(msg.chat.id, 'Channel set to <code>' + escapeHtml_(requested) + '</code>. Confessions will go here now.');
+  sendMessage(msg.chat.id, 'Channel set to <code>' + escapeHtml(requested) + '</code>. Confessions will go here now.');
 }
 
-function checkRateLimit_(userId, command) {
+function checkRateLimit(userId, command) {
   if (!userId) return false;
   const bucket = Math.floor(Date.now() / 60000);
   const key = 'rl_' + String(userId) + '_' + command + '_' + bucket;
@@ -270,7 +270,7 @@ function checkRateLimit_(userId, command) {
   return false;
 }
 
-function parseCommand_(text) {
+function parseCommand(text) {
   if (!text || text.charAt(0) !== '/') return null;
   const body = text.substring(1);
   const spaceIdx = body.search(/\s/);
@@ -284,17 +284,17 @@ function parseCommand_(text) {
 }
 
 /* --- CHANNEL POSTING --- */
-function postCommentToChannel_(comment) {
+function postCommentToChannel(comment) {
   const ch = getChannelId();
   if (!ch) return false;
-  return postToChannel_(ch, '<b>Comment:</b>\n\n' + comment);
+  return postToChannel(ch, '<b>Comment:</b>\n\n' + comment);
 }
-function postRoastToChannel_(roast) { return postCommentToChannel_(roast); }
-function postToChannel_(channelId, body) {
+function postRoastToChannel(roast) { return postCommentToChannel(roast); }
+function postToChannel(channelId, body) {
   const resp = sendMessage(channelId, body);
   return !!(resp && resp.ok === true);
 }
-function postToChannelWithResult_(channelId, body) {
+function postToChannelWithResult(channelId, body) {
   const resp = sendMessage(channelId, body);
   return resp || null;
 }
@@ -307,7 +307,7 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'bad_json' })).setMimeType(ContentService.MimeType.JSON);
   }
   try {
-    if (update.message) handleMessage_(update.message);
+    if (update.message) handleMessage(update.message);
     else if (update.edited_message) console.log('doPost: edited_message ignored');
     else if (update.callback_query) console.log('doPost: callback_query ignored');
     else console.log('doPost: no message / edited / callback');
@@ -324,10 +324,10 @@ function doPost(e) {
 }
 
 /* --- MESSAGE HANDLER --- */
-const PRIVATE_ONLY_MESSAGE_ = 'Please talk to me in a private chat.';
-function handleMessage_(msg) {
+const PRIVATE_ONLY_MESSAGE = 'Please talk to me in a private chat.';
+function handleMessage(msg) {
   try {
-    if (!msg || !msg.chat) { console.log('handleMessage_: no chat'); return; }
+    if (!msg || !msg.chat) { console.log('handleMessage: no chat'); return; }
     const autoReplyOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
     const chId = getChannelId();
     // Channel listener: opt-in via AUTO_REPLY script property
@@ -340,7 +340,7 @@ function handleMessage_(msg) {
       return;
     }
     if (msg.chat.type !== 'private') {
-      sendMessage(msg.chat.id, escapeHtml_(PRIVATE_ONLY_MESSAGE_));
+      sendMessage(msg.chat.id, escapeHtml(PRIVATE_ONLY_MESSAGE));
       return;
     }
     const text = (msg.text || '').trim();
@@ -349,23 +349,23 @@ function handleMessage_(msg) {
       sendMessage(msg.chat.id, 'Only commands. Type /help.');
       return;
     }
-    const parsed = parseCommand_(text);
+    const parsed = parseCommand(text);
     if (!parsed) {
       sendMessage(msg.chat.id, 'Could not parse command. Type /help.');
       return;
     }
     switch (parsed.command) {
-      case 'start': return cmdStart_(msg);
-      case 'help': return cmdHelp_(msg);
-      case 'comment': return cmdComment_(msg, parsed.args);
-      case 'roast': return cmdComment_(msg, parsed.args);
-      case 'confess': return cmdConfess_(msg, parsed.args);
-      case 'reply': return cmdReply_(msg, parsed.args);
-      case 'setchannel': return cmdSetChannel_(msg, parsed.args);
+      case 'start': return cmdStart(msg);
+      case 'help': return cmdHelp(msg);
+      case 'comment': return cmdComment(msg, parsed.args);
+      case 'roast': return cmdComment(msg, parsed.args);
+      case 'confess': return cmdConfess(msg, parsed.args);
+      case 'reply': return cmdReply(msg, parsed.args);
+      case 'setchannel': return cmdSetChannel(msg, parsed.args);
       default: sendMessage(msg.chat.id, 'Unknown command. Type /help.');
     }
   } catch (err) {
-    console.error('handleMessage_: error:', err);
+    console.error('handleMessage: error:', err);
     try { if (msg && msg.chat && msg.chat.id) sendMessage(msg.chat.id, 'Error. Try again.'); } catch (e2) {}
   }
 }
