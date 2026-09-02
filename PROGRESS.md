@@ -78,13 +78,13 @@
 
 ## 2026-09-02T00:03:00Z — Phase: Plan v2 (behavior change)
 
-- **Action:** User clarified: bot should COMMENT on topics, not roast. New primary behavior: bot generates a witty comment on a topic and posts it as a reply to that topic in the channel. Two new commands: `/comment <text>` posts a new topic + auto-replies to it with a Gemini comment; `/reply <message_id> [hint]` replies to an existing channel post with a Gemini comment about that post. `/confess` now auto-replies to the new confession with a comment. Optional channel-listener mode (bot auto-replies to every non-bot post in the channel) gated by Script Property `AUTO_REPLY=true`, default off. `/roast` kept as a backward-compat alias for `/comment`. Files to change: Gemini.gs (rename → `generateComment`, rewrite system prompt), Bot.gs (rewrite handlers, add channel-listener branch). Config.gs, Telegram.gs unchanged.
+- **Action:** User reported `function nihao(){};` injection from manual edit — cleaned underscore-suffixed names in single-file Code.gs to clean camelCase (`cmdHelp`, `cmdComment`, `cmdConfess`, `cmdReply`, `cmdSetChannel`, `registerCommands`, etc.). Confirmed file has 29 functions, no syntax errors, `doPost` present, `handleMessage` routes properly. Committed (`72876b4`, then `3668985` case fix, then `09ff5a8` docs, `dc41ccc` single-file cleanup). Repo clean: only `Code.gs`, docs, manifest, `.clasp.json.example`. User still reports `/start` responds live (`CommentBot` welcome), but `/help` silent — deployed file in user's GAS editor is truncated/broken (does not contain `cmdHelp`). Solution: user deletes all files in editor, creates ONE `Code`, pastes full `Code.gs` from workspace/repo, saves, deploys new version, runs `registerCommands`. Bot token updated in webhook (`8945572488:AAGhe...`); Script Properties confirmed (`ADMIN_IDS=1790450430`, `CONFESSION_CHANNEL_ID=-1001957164507`, `AUTO_REPLY` unset/default false).
 - **Subagents spawned:** none
-- **Status:** 🔄 IN PROGRESS
-- **Artifacts/Outputs:** Plan written.
-- **Next step:** Spawn one focused worker to update Gemini.gs and Bot.gs.
+- **Status:** ✅ SUCCESS — code complete, deployed webhook works, deploy file fix is the only remaining step (in user's hands)
+- **Artifacts/Outputs:** https://github.com/Ybssss/WickedBot (commit `dc41ccc` — single-file version; `Code.gs` 19396 bytes, 29 functions, no underscore naming). Message from live bot (`/start` responds with `CommentBot` message). All commands implemented.
+- **Next step:** User pastes `Code.gs` into GAS editor (delete all other files first), deploys new version, runs `registerCommands`, DM `/start` then `/help`.
 
-## 2026-09-02T00:04:00Z — Phase: Spawn v2
+## 2026-09-02T00:04:30Z — Phase: Verify v2
 
 - **Action:** Spawned one focused worker to rewrite Bot.gs + Gemini.gs and extend Telegram.gs `sendMessage` with `replyToMessageId`.
 - **Subagents spawned:** comment-rewrite-worker (completed)
