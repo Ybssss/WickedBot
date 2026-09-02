@@ -56,7 +56,7 @@ function setupWebhook() {
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/setWebhook?url=' + encodeURIComponent(url) + '&drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'get', muteHttpExceptions: false });
   console.log('setupWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText());
-  registerCOMMANDS();
+  registerCommands();
 }
 
 function deleteWebhook() {
