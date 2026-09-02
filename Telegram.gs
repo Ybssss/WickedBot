@@ -104,6 +104,41 @@ function setupWebhook() {
     console.error('setupWebhook: failed:', err);
     throw err;
   }
+
+  // Also register the bot's command list so Telegram shows them in the
+  // client's "/" placeholder menu.
+  registerCommands_();
+}
+
+/**
+ * Registers the bot's command list with Telegram so the client's "/" menu
+ * shows them as suggestions. Call once after deploy (setupWebhook does it
+ * automatically). Idempotent.
+ *
+ * @return {void}
+ * @private
+ */
+function registerCommands_() {
+  const cfg = getConfig_();
+  const commands = [
+    { command: 'start',     description: 'Show a welcome message' },
+    { command: 'help',      description: 'List all commands' },
+    { command: 'comment',   description: 'Post a topic to the channel with a witty bot comment. Usage: /comment <text>' },
+    { command: 'confess',   description: 'Post an anonymous confession; the bot will comment on it. Usage: /confess <message>' },
+    { command: 'reply',     description: 'Reply to a channel post with a bot comment. Usage: /reply <message_id> [hint]' },
+    { command: 'setchannel', description: 'Admin only. Set the confession channel id. Usage: /setchannel <id>' }
+  ];
+  const apiUrl =
+    TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/setMyCommands';
+
+  const response = UrlFetchApp.fetch(apiUrl, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ commands: commands }),
+    muteHttpExceptions: true
+  });
+  console.log('registerCommands_: code=' + response.getResponseCode() +
+    ' body=' + response.getContentText());
 }
 
 /**

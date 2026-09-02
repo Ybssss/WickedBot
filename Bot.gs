@@ -155,12 +155,12 @@ function cmdHelp_(msg) {
   const lines = ['<b>Available commands</b>\n'];
   for (let i = 0; i < COMMANDS_.length; i++) {
     const c = COMMANDS_[i];
-    lines.push('/' + c.name + ' — ' + escapeHtml_(c.description));
+    lines.push('/' + c.name + ' &mdash; ' + escapeHtml_(c.description));
   }
   lines.push('\nAdmins can also use /setchannel to configure the channel.');
   const autoReplyOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
   if (autoReplyOn) {
-    lines.push('\nAuto-reply is <b>on</b> — the bot will comment on every new channel post.');
+    lines.push('\nAuto-reply is <b>on</b> &mdash; the bot will comment on every new channel post.');
   }
   sendMessage(msg.chat.id, lines.join('\n'));
 }
