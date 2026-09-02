@@ -1,5 +1,21 @@
 # Ares Orchestration Log
 
+## 2026-09-02T03:45:00Z — Phase: Push
+
+- **Action:** Configured `origin` → https://github.com/Ybssss/WickedBot.git. Initial commit `74d0a57` pushed to `master`. GitHub push protection blocked the first attempt because PROGRESS.md briefly contained the real Gemini API key pasted by the user; redacted the key from PROGRESS.md and amended the commit. Verified the key is nowhere in the pushed commit (`git grep` clean). Note: the key was also visible in the chat session and should be considered compromised regardless of repo state — recommend rotation at https://aistudio.google.com/apikey.
+- **Subagents spawned:** none
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** master at 74d0a57 on origin. https://github.com/Ybssss/WickedBot
+- **Next step:** Deploy + Script Properties.
+
+## 2026-09-02T03:46:00Z — Phase: Deploy + Fix em-dash + registerCommands_
+
+- **Action:** User provided GAS project URL (1Z9rSsI4eR5yilleNLCylZopS8BrDGfI5dm4s17U1kL6wyzkcA5qNnWla), web app URL (AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec), bot token (8972406236:AAEzCJid3zEkOBszXui_ZHUTT17UGmWTi64), gemini key, admin id 1790450430. Registered webhook (Telegram getWebhookInfo confirmed). User reported `/start` works but `/help` silent. Root cause: em-dash U+2014 in cmdHelp_ rejected by Telegram's HTML parser. Fixed: replaced `—` with `&mdash;` in Bot.gs; added `registerCommands_` in Telegram.gs so `/` placeholder shows commands. Committed + pushed. User attempted re-deploy multiple times; /help remains silent because deployed `Bot.gs` in editor is truncated. User confirmed `ConfessionBot` reference uses single-file pattern (more reliable for GAS).
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL — code in repo is correct, `/start` works live, but `/help` (and any handler after the truncate point) silent due to deployed file state.
+- **Artifacts/Outputs:** commit `4c89cd1` (em-dash fix + registerCommands_); commit `2026-09-02T...` final. Repo: https://github.com/Ybssss/WickedBot
+- **Next step:** If user wants to retry, rebuild as single `Code.gs` matching ConfessionBot's pattern.
+
 ## 2026-09-02T03:40:00Z — Phase: Rename
 
 - **Action:** User requested rename `RoastingBot` → `WickedBot`. Moved via `robocopy /MOVE` to `C:\Users\YB\Projects\WickedBot`. Old `RoastingBot` directory persists as an empty tomb (file-handle-locked by Defender or system process; harmless).
