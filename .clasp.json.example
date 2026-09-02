@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy this file to .clasp.json and replace YOUR_SCRIPT_ID_HERE with the script id from File -> Project settings -> IDs in the Apps Script editor. Do NOT commit .clasp.json; it is gitignored.",
+  "scriptId": "YOUR_SCRIPT_ID_HERE",
+  "rootDir": "."
+}
