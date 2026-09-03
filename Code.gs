@@ -192,7 +192,7 @@ function cmdStart(msg) {
 
 function cmdHelp(msg) {
   const lines = ['<b>Available commands</b>\n'];
-  for (let i = 0; i < COMMANDS.length; i++) { lines.push('/' + COMMANDS[i].name + ' &mdash; ' + escapeHtml(COMMANDS[i].description)); }
+  for (let i = 0; i < COMMANDS.length; i++) { lines.push('/' + COMMANDS[i].name + ' — ' + escapeHtml(COMMANDS[i].description)); }
   lines.push('\nAdmins can also use /setchannel to configure the channel.');
   const on = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
   if (on) lines.push('\nAuto-reply is <b>on</b> &mdash; the bot comments on every new channel post.');
@@ -448,17 +448,17 @@ function testHelpPayload_() {
 
 function debugDoPostHelp() {
  console.log('=== debugDoPostHelp — mock e.postData ===');
- var update = { update_id: 9999991, message: mockPrivateMsg_('/help', {message_id: 100}) };
+ var freshId = 9000000 + Math.floor(Math.random()*1000000);
+ console.log('using freshId='+freshId);
+ var update = { update_id: freshId, message: mockPrivateMsg_('/help', {message_id: 100}) };
  var e = { postData: { contents: JSON.stringify(update) } };
  var res = doPost(e);
  var body = ''; try { body = typeof res.getContent === 'function' ? res.getContent() : (typeof res.getContentText==='function'?res.getContentText(): String(res)); } catch(err){ body='err:'+err; }
  console.log('doPost res body='+body);
- console.log('doPost res body type='+typeof body);
- // check duplicate
+ // second call same ID should be duplicate_ignored
  var res2 = doPost(e);
  var body2=''; try{ body2 = typeof res2.getContent==='function'?res2.getContent(): (typeof res2.getContentText==='function'?res2.getContentText(): String(res2)); }catch(err){body2='err:'+err;}
  console.log('doPost dup res body='+body2);
- // also directly test cmdHelp sendMessage result
  console.log('=== direct sendMessage payload test ===');
  var payload = testHelpPayload_();
  console.log('payload logged above');
