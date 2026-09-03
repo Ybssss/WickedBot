@@ -400,3 +400,61 @@ function handleMessage(msg) {
     try { if (msg && msg.chat && msg.chat.id) sendMessage(msg.chat.id, 'Error. Try again.'); } catch (e2) {}
   }
 }
+
+/* === MOCK / DEBUG — run in editor, no webhook ===
+// Usage in editor: Run -> testParse, testCmdHelp, testHandleHelp, debugDoPostHelp
+// Check View -> Logs (or Executions -> logs) after each run.
+// These never touch webhook; they log to spreadsheet 174KDDCM... via logUpdate_ as well.
+*/
+
+function mockPrivateMsg_(text, overrides) {
+ overrides = overrides || {};
+ return {
+   message_id: overrides.message_id || 999,
+   from: { id: 1790450430, is_bot: false, username: 'YBcode_000', first_name: 'YB' },
+   chat: { id: 1790450430, type: 'private' },
+   date: Math.floor(Date.now()/1000),
+   text: text
+ };
+}
+
+function testParse() {
+ var cases = ['/help', '/help@WickedAICoffesionbot', '/help ', '/HELP', '/start', '/Help foo', '/unknown'];
+ for (var i=0;i<cases.length;i++) { var p=parseCommand(cases[i]); console.log('parse['+cases[i]+'] => '+JSON.stringify(p)); }
+}
+
+function testCmdHelp() {
+ console.log('=== testCmdHelp direct ===');
+ try { cmdHelp(mockPrivateMsg_('/help')); console.log('cmdHelp returned ok'); } catch(e){ console.error('cmdHelp threw', e); }
+}
+
+function testHandleHelp() {
+ console.log('=== testHandleHelp via handleMessage ===');
+ try { handleMessage(mockPrivateMsg_('/help')); console.log('handleMessage /help done'); } catch(e){ console.error(e); }
+ try { handleMessage(mockPrivateMsg_('/start')); console.log('handleMessage /start done'); } catch(e){ console.error(e); }
+}
+
+function testHelpPayload_() {
+ // what sendMessage would send for /help
+ var lines = ['<b>Available commands</b>\n'];
+ for (var i=0;i<COMMANDS.length;i++) lines.push('/'+COMMANDS[i].name+' &mdash; '+escapeHtml(COMMANDS[i].description));
+ lines.push('\nAdmins can also use /setchannel to configure the channel.');
+ var payload = lines.join('\n');
+ console.log('help payload len='+payload.length);
+ console.log(payload);
+ // try parse as HTML validation: log if would fail
+ return payload;
+}
+
+function debugDoPostHelp() {
+ console.log('=== debugDoPostHelp — mock e.postData ===');
+ var update = { update_id: 9999991, message: mockPrivateMsg_('/help', {message_id: 100}) };
+ var e = { postData: { contents: JSON.stringify(update) } };
+ var res = doPost(e);
+ console.log('doPost res code='+res.getResponseCode()+' body='+res.getContentText());
+ // second call same update_id should be duplicate_ignored
+ var res2 = doPost(e);
+ console.log('doPost dup res body='+res2.getContentText());
+}
+
+function debugAll_() { testParse(); testHelpPayload_(); testHandleHelp(); debugDoPostHelp(); }
