@@ -324,3 +324,21 @@
 - **Artifacts/Outputs:** logs show doPost_received only for /start, duplicate_ignored for retries, no /help dispatch; curl echo 302 is normal GAS redirect
 - **Next step:** Defer spreadsheet logging off critical path + flush queue
 
+
+## 2026-09-03T02:49:16Z — Phase: Fix
+
+- **Action:** Deferred parsed_/dispatch_ logs to after reply; before this commit retry flood 29357111 x10, 29357114 x7 blocked /help (pending 4, 302)
+- **Subagents spawned:** defer-log-worker, defer-handleMessage-worker
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** 81d59cc removed doPost_received pre-log, e4255c3 removed parsed_/dispatch_ pre-logs — reply now before SpreadsheetApp — pushed
+- **Next step:** Deploy New version -> Anyone, flush queue, verify /start /help both reply 1x
+
+
+## 2026-09-03T03:00:12Z — Phase: Plan
+
+- **Action:** Plan mock debug harness — add testParse/testCmdHelp/testHandleHelp/debugDoPostHelp to Code.gs for editor-run without webhook
+- **Subagents spawned:** none
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Scope: mockPrivateMsg_ + 6 test fns at EOF, no webhook change
+- **Next step:** Spawn mock-worker batch
+
