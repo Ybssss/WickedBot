@@ -28,6 +28,7 @@ const TELEGRAM_API_BASE_ = 'https://api.telegram.org';
 const LOG_SHEET_ID = '174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc';
 const LOG_SHEET_NAME = 'logs';
 const WEBHOOK_URL_ = 'https://script.google.com/macros/s/AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec';
+const USE_POLLING_ = true;
 
 function getConfig() {
   const props = PropertiesService.getScriptProperties();
@@ -68,7 +69,54 @@ function deleteWebhook() {
   const cfg = getConfig();
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/deleteWebhook?drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'post', muteHttpExceptions: true });
-  console.log('deleteWebhook: ' + resp.getContentText());
+  console.log('deleteWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText());
+}
+
+function pollTelegram_() {
+  const cfg = getConfig();
+  const props = PropertiesService.getScriptProperties();
+  let offset = parseInt(props.getProperty('POLL_OFFSET') || '0', 10);
+  if (isNaN(offset)) offset = 0;
+  const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/getUpdates?timeout=5&limit=20&offset=' + offset;
+  let resp;
+  try { resp = UrlFetchApp.fetch(apiUrl, { method: 'get', muteHttpExceptions: true }); } catch(e){ console.error('pollTelegram_: fetch failed', e); return; }
+  if (resp.getResponseCode() < 200 || resp.getResponseCode() >=300) { console.error('pollTelegram_: http '+resp.getResponseCode()+' '+resp.getContentText()); return; }
+  let data; try { data = JSON.parse(resp.getContentText()); } catch(e){ console.error('pollTelegram_: parse', e); return; }
+  if (!data.ok || !data.result || data.result.length===0) return;
+  let maxId = offset;
+  for (let i=0;i<data.result.length;i++) {
+    const update = data.result[i];
+    const uid = update.update_id;
+    if (uid >= maxId) maxId = uid + 1;
+    try {
+      if (update.message) handleMessage(update.message);
+      else if (update.channel_post) {
+        const chId = getChannelId();
+        const autoOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
+        if (autoOn && chId && update.channel_post.chat && String(update.channel_post.chat.id)===String(chId) && update.channel_post.text && !update.channel_post.from.is_bot) {
+          let c; try{ c=generateComment(String(update.channel_post.text).trim(), ''); }catch(e){}
+          if (c) sendMessage(chId, '<b>Comment:</b>\n\n'+c, {replyToMessageId: update.channel_post.message_id});
+        }
+      }
+    } catch(e){ console.error('pollTelegram_ handle', e); }
+    try { props.setProperty('POLL_OFFSET', String(maxId)); } catch(e){}
+  }
+}
+
+function setupPolling() {
+  deleteWebhook();
+  PropertiesService.getScriptProperties().setProperty('POLL_OFFSET', '0');
+  const triggers = ScriptApp.getProjectTriggers();
+  for (let i=0;i<triggers.length;i++) if (triggers[i].getHandlerFunction()==='pollTelegram_') ScriptApp.deleteTrigger(triggers[i]);
+  ScriptApp.newTrigger('pollTelegram_').timeBased().everyMinutes(1).create();
+  console.log('setupPolling: created 1m trigger, webhook deleted, offset 0');
+}
+
+function stopPolling() {
+  const triggers = ScriptApp.getProjectTriggers();
+  for (let i=0;i<triggers.length;i++) if (triggers[i].getHandlerFunction()==='pollTelegram_') ScriptApp.deleteTrigger(triggers[i]);
+  console.log('stopPolling: removed poll triggers');
+  setupWebhook();
 }
 
 function registerCommands() {
