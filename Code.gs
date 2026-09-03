@@ -10,7 +10,7 @@
    4. Set Script Properties (gear icon):
       TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, ADMIN_IDS, AUTO_REPLY, CONFESSION_CHANNEL_ID
    5. Deploy -> New deployment -> Web app -> Anyone -> Deploy. Copy URL.
-   6. Open editor dropdown -> select 'registerCOMMANDS': Run (one-time).
+   6. Open editor dropdown -> select 'registerCommands': Run (one-time).
    7. DM bot /start -> should respond. /help -> command list.
 
    WARNING: the user pasted their real Gemini API key in this chat. The key is
@@ -81,7 +81,7 @@ function registerCommands() {
     method: 'post', contentType: 'application/json',
     payload: JSON.stringify({ commands: commands }), muteHttpExceptions: true
   });
-  console.log('registerCOMMANDS: ' + resp.getResponseCode() + ' ' + resp.getContentText());
+  console.log('registerCommands: ' + resp.getResponseCode() + ' ' + resp.getContentText());
 }
 
 /* --- MESSAGE SENDER WITH REPLY SUPPORT --- */
