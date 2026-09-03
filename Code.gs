@@ -308,6 +308,21 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'bad_json' })).setMimeType(ContentService.MimeType.JSON);
   }
   try {
+    const uid = update.update_id;
+    if (uid !== undefined && uid !== null) {
+      const dupCache = CacheService.getScriptCache();
+      const dupKey = 'upd_' + String(uid);
+      if (dupCache.get(dupKey)) {
+        console.log('doPost: duplicate update_id ' + uid + ' ignored');
+        return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
+      }
+      try { dupCache.put(dupKey, '1', 600); } catch (e2) {}
+    }
+    // channel posts are handled only via AUTO_REPLY listener, not as private commands
+    if (update.channel_post || update.edited_channel_post) {
+      console.log('doPost: channel_post ignored (no AUTO_REPLY dispatch here)');
+      return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
+    }
     if (update.message) handleMessage(update.message);
     else if (update.edited_message) console.log('doPost: edited_message ignored');
     else if (update.callback_query) console.log('doPost: callback_query ignored');
@@ -329,6 +344,7 @@ const PRIVATE_ONLY_MESSAGE = 'Please talk to me in a private chat.';
 function handleMessage(msg) {
   try {
     if (!msg || !msg.chat) { console.log('handleMessage: no chat'); return; }
+    if (msg.from && msg.from.is_bot) { console.log('handleMessage: ignore bot'); return; }
     const autoReplyOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
     const chId = getChannelId();
     // Channel listener: opt-in via AUTO_REPLY script property

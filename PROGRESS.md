@@ -153,3 +153,21 @@
 - **Artifacts/Outputs:** Spawning worker to patch Code.gs setupWebhook to force /exec
 - **Next step:** Verify patch + git push
 
+
+## 2026-09-03T01:32:28Z — Phase: Fix
+
+- **Action:** Patched setupWebhook: url.replace(/\/dev$/, '/exec') — now resolves to AKfycby.../exec instead of AKfycbw1.../dev
+- **Subagents spawned:** fix-webhook-worker
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** Code.gs:54-55 fixed, committed 7bfaffc pushed to origin/master
+- **Next step:** User repastes Code.gs, New deployment -> Anyone, run setupWebhook once
+
+
+## 2026-09-03T01:34:32Z — Phase: Diagnose spam
+
+- **Action:** /start now repeats 3x + ghost sends at 9:30/9:31 — webhook now hits /exec but deduplication missing; /help mis-routed to /start reply
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL — deduplication + retry loop needs patch; immediate stop via deleteWebhook
+- **Artifacts/Outputs:** Spam 7 msgs: 9:29 /start -> 3x CommentBot, 9:29 /help -> 1x CommentBot (expected Available commands), 9:30-9:31 ghost CommentBot x3 without user input; pending retry or duplicate deliveries
+- **Next step:** Patch Code.gs with update_id dedup cache + verify triggers
+
