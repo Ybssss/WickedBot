@@ -342,3 +342,21 @@
 - **Artifacts/Outputs:** Scope: mockPrivateMsg_ + 6 test fns at EOF, no webhook change
 - **Next step:** Spawn mock-worker batch
 
+
+## 2026-09-03T03:03:16Z — Phase: Spawn
+
+- **Action:** Added editor mock harness to Code.gs for /help debug without webhook
+- **Subagents spawned:** mock-worker
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** mockPrivateMsg_, testParse, testCmdHelp, testHandleHelp, testHelpPayload_, debugDoPostHelp, debugAll_ appended (460 lines) — bcfbf10 pushed
+- **Next step:** User pastes Code.gs, runs mocks in editor View->Logs
+
+
+## 2026-09-03T03:07:32Z — Phase: Diagnose mock
+
+- **Action:** Mock triage: testCmdHelp ok, testHandleHelp ok, debugDoPostHelp threw TypeError res.getResponseCode is not a function
+- **Subagents spawned:** mock-fix-worker
+- **Status:** ⚠️ PARTIAL — TextOutput has no getResponseCode
+- **Artifacts/Outputs:** Code.gs:454 TypeError; cmdHelp/handleMessage themselves ok in-mock; real /help still silent
+- **Next step:** Fix harness TextOutput API + expose sendMessage result
+
