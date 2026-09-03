@@ -360,3 +360,21 @@
 - **Artifacts/Outputs:** Code.gs:454 TypeError; cmdHelp/handleMessage themselves ok in-mock; real /help still silent
 - **Next step:** Fix harness TextOutput API + expose sendMessage result
 
+
+## 2026-09-03T04:31:20Z — Phase: Diagnose mock
+
+- **Action:** debugDoPostHelp hit duplicate_ignored on first call (ID 9999991 cached 600s) — proves dedupe working; help payload 466 chars leaked &mdash; literal not rendered as —
+- **Subagents spawned:** fix-entity-worker
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** 12:30 logs: doPost duplicate_ignored -> {ok:true}, help len 466, user DID receive DM with literal &mdash; -> parse_mode HTML not decoding entity
+- **Next step:** Fix cmdHelp entity + fresh ID harness
+
+
+## 2026-09-03T04:31:46Z — Phase: Diagnose mock success
+
+- **Action:** mock harness: testCmdHelp ok, testHandleHelp ok, debugDoPostHelp duplicate_ignored (stale 9999991) — handler fine, webhook 302 queue blocks
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL — root cause: GAS 302 echo + fixed ID cache + &mdash; literal
+- **Artifacts/Outputs:** 12:30 payload 466 chars received DM with literal &mdash; (HTML entity not decoded by Telegram HTML mode); pending 4 at 10:33 due to 302 considered error
+- **Next step:** Fix cmdHelp entity + harness fresh ID, verify live /help
+
