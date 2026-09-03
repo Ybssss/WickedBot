@@ -171,3 +171,30 @@
 - **Artifacts/Outputs:** Spam 7 msgs: 9:29 /start -> 3x CommentBot, 9:29 /help -> 1x CommentBot (expected Available commands), 9:30-9:31 ghost CommentBot x3 without user input; pending retry or duplicate deliveries
 - **Next step:** Patch Code.gs with update_id dedup cache + verify triggers
 
+
+## 2026-09-03T01:38:58Z — Phase: Fix
+
+- **Action:** Fixed spam: doPost dedupe by update_id (600s), handleMessage ignore is_bot, channel_post early return
+- **Subagents spawned:** spam-dedup-worker
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** Code.gs 404 lines (+16 dedupe), committed b6ba428 pushed to origin/master
+- **Next step:** User repastes Code.gs, New deployment -> Anyone, drop_pending_updates
+
+
+## 2026-09-03T01:43:17Z — Phase: Plan
+
+- **Action:** Plan spreadsheet logging to 174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc — log every webhook update + command result for spam/009ee debugging
+- **Subagents spawned:** none (planning)
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Scope: Code.gs logToSheet_ + doPost hooks + appsscript.json oauthScopes
+- **Next step:** Spawn worker batch to implement logging
+
+
+## 2026-09-03T01:43:35Z — Phase: Plan
+
+- **Action:** Published plan for spreadsheet logging (scope, workers, batching) — Code.gs logToSheet_ + appsscript.json oauthScopes for 174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc
+- **Subagents spawned:** none
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Plan: 2 workers (log-impl, manifest) — parallel batch, dedup safe
+- **Next step:** Spawn worker batch
+

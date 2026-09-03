@@ -25,6 +25,8 @@
 const BOT_VERSION = '1.0.0';
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const TELEGRAM_API_BASE_ = 'https://api.telegram.org';
+const LOG_SHEET_ID = '174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc';
+const LOG_SHEET_NAME = 'logs';
 
 function getConfig() {
   const props = PropertiesService.getScriptProperties();
@@ -47,6 +49,9 @@ function isAdmin(userId) { if (userId === null || userId === undefined) return f
 function escapeHtml(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+function logToSheet_(row) { try { const ss = SpreadsheetApp.openById(LOG_SHEET_ID); let sh = ss.getSheetByName(LOG_SHEET_NAME); if (!sh) { sh = ss.insertSheet(LOG_SHEET_NAME); sh.appendRow(['timestamp','update_id','chat_id','chat_type','user_id','username','text','parsed_command','action','error','webhook_url']); } sh.appendRow(row); } catch (e) { console.error('logToSheet_:', e); } }
+function logUpdate_(update, parsed, action, error) { try { const msg = update.message || update.channel_post || update.edited_message || {}; const chat = msg.chat || {}; const from = msg.from || {}; const text = msg.text || JSON.stringify(update).substring(0,500); const row = [ new Date().toISOString(), update.update_id || '', chat.id || '', chat.type || (update.channel_post ? 'channel' : ''), from.id || '', from.username || '', String(text).substring(0,500), parsed ? parsed.command : '', action || '', error ? String(error).substring(0,500) : '', '' ]; logToSheet_(row); } catch(e){} }
 
 /* --- WEBHOOK & COMMAND REGISTRATION --- */
 function setupWebhook() {
@@ -314,13 +319,16 @@ function doPost(e) {
       const dupKey = 'upd_' + String(uid);
       if (dupCache.get(dupKey)) {
         console.log('doPost: duplicate update_id ' + uid + ' ignored');
+        try { logUpdate_(update, null, 'duplicate_ignored', null); } catch(_e){}
         return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
       }
       try { dupCache.put(dupKey, '1', 600); } catch (e2) {}
     }
+    try { logUpdate_(update, null, 'doPost_received', null); } catch(_e){}
     // channel posts are handled only via AUTO_REPLY listener, not as private commands
     if (update.channel_post || update.edited_channel_post) {
       console.log('doPost: channel_post ignored (no AUTO_REPLY dispatch here)');
+      try { logUpdate_(update, null, 'channel_post_ignored', null); } catch(_e){}
       return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
     }
     if (update.message) handleMessage(update.message);
@@ -343,8 +351,8 @@ function doPost(e) {
 const PRIVATE_ONLY_MESSAGE = 'Please talk to me in a private chat.';
 function handleMessage(msg) {
   try {
-    if (!msg || !msg.chat) { console.log('handleMessage: no chat'); return; }
-    if (msg.from && msg.from.is_bot) { console.log('handleMessage: ignore bot'); return; }
+    if (!msg || !msg.chat) { console.log('handleMessage: no chat'); try{ logUpdate_({message: msg||{}}, null, 'no_chat', null);}catch(_e){} return; }
+    if (msg.from && msg.from.is_bot) { console.log('handleMessage: ignore bot'); try{ logUpdate_({message: msg}, null, 'bot_ignored', null);}catch(_e){} return; }
     const autoReplyOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
     const chId = getChannelId();
     // Channel listener: opt-in via AUTO_REPLY script property
@@ -357,20 +365,25 @@ function handleMessage(msg) {
       return;
     }
     if (msg.chat.type !== 'private') {
+      try{ logUpdate_({message: msg}, null, 'non_private_ignored', null);}catch(_e){}
       sendMessage(msg.chat.id, escapeHtml(PRIVATE_ONLY_MESSAGE));
       return;
     }
     const text = (msg.text || '').trim();
-    if (text.length === 0) return;
+    if (text.length === 0) { try{ logUpdate_({message: msg}, null, 'empty_text', null);}catch(_e){} return; }
     if (text.charAt(0) !== '/') {
+      try{ logUpdate_({message: msg}, null, 'non_slash_ignored', null);}catch(_e){}
       sendMessage(msg.chat.id, 'Only commands. Type /help.');
       return;
     }
     const parsed = parseCommand(text);
+    try{ logUpdate_({message: msg}, parsed, parsed ? 'parsed_'+parsed.command : 'parse_failed', null);}catch(_e){}
     if (!parsed) {
+      try{ logUpdate_({message: msg}, null, 'parse_failed', null);}catch(_e){}
       sendMessage(msg.chat.id, 'Could not parse command. Type /help.');
       return;
     }
+    try{ logUpdate_({message: msg}, parsed, 'dispatch_'+parsed.command, null);}catch(_e){}
     switch (parsed.command) {
       case 'start': return cmdStart(msg);
       case 'help': return cmdHelp(msg);
@@ -383,6 +396,7 @@ function handleMessage(msg) {
     }
   } catch (err) {
     console.error('handleMessage: error:', err);
+    try{ logUpdate_({message: msg||{}}, null, 'handle_error', err);}catch(_e){}
     try { if (msg && msg.chat && msg.chat.id) sendMessage(msg.chat.id, 'Error. Try again.'); } catch (e2) {}
   }
 }
