@@ -243,3 +243,84 @@
 - **Artifacts/Outputs:** Pending verification
 - **Next step:** Verify Code.gs patch and push
 
+
+## 2026-09-03T02:20:23Z — Phase: Verify
+
+- **Action:** Hardcoded WEBHOOK_URL_ to AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec; webhook now verified pending 0 no 401
+- **Subagents spawned:** fix-webhook-url
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** getWebhookInfo url=AKfycbyYL3Wg.../exec pending 0 (was AKfycbw1.../exec 401 pending 1); Code.gs 6c338bb committed+pushed
+- **Next step:** User repastes Code.gs, New version -> Anyone, run setupWebhook once, test /start
+
+
+## 2026-09-03T02:25:05Z — Phase: Diagnose partial fix
+
+- **Action:** 10:21 /start + /help -> only 1 CommentBot reply; 10:23 /help no reply — webhook now ACKs (pending 0 earlier) but missing 2nd dispatch
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL
+- **Artifacts/Outputs:** spreadsheet 174KDDCM + Executions needed to confirm parsed_/dispatch_ vs dropped
+- **Next step:** Request getWebhookInfo + Executions + sheet rows
+
+
+## 2026-09-03T02:25:49Z — Phase: Verify
+
+- **Action:** Triaged 10:21 2 commands -> 1 reply, 10:23 /help -> 0 replies — requested getWebhookInfo + Executions + sheet 174KDDCM logs
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL
+- **Artifacts/Outputs:** Webhook AKfycbyYL3Wg.../exec pending 0 earlier; now under-response suggests dedupe or logging latency or stale deployment
+- **Next step:** Await evidence, then patch logging path if timeout
+
+
+## 2026-09-03T02:28:49Z — Phase: Verify
+
+- **Action:** getWebhookInfo 302 Found pending 3 on AKfycbyYL3Wg.../exec — deployment not Anyone anonymous (redirect to login)
+- **Subagents spawned:** none
+- **Status:** ❌ FAILED
+- **Artifacts/Outputs:** url=AKfycbyYL3Wg.../exec pending=3 last_error=302 Found — doPost never executed (no Executions log)
+- **Next step:** Switch deployment Who has access -> Anyone, New version, drop queue
+
+
+## 2026-09-03T02:30:48Z — Phase: Verify
+
+- **Action:** 302 Found pending 3 after user confirms Anyone — deployment mismatch / not New version / workspace policy
+- **Subagents spawned:** none
+- **Status:** ❌ FAILED
+- **Artifacts/Outputs:** getWebhookInfo url=AKfycbyYL3Wg.../exec still 302; either Who has access not anonymous Despite UI or deployment not republished with new scopes
+- **Next step:** Anon curl POST test + recreate deployment as new Web app
+
+
+## 2026-09-03T02:32:20Z — Phase: Verify
+
+- **Action:** Webhook reset to AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec Anyone -> 200, pending 0, no 302/401
+- **Subagents spawned:** none
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** getWebhookInfo url=AKfycbyYL3Wg.../exec pending 0 hardcode WEBHOOK_URL_ 6c338bb + dedupe + sheet f46a0b2 now live
+- **Next step:** DM /start then /help, check Executions + sheet 174KDDCM
+
+
+## 2026-09-03T02:35:22Z — Phase: Verify
+
+- **Action:** Webhook again 302 pending 4 after 10:33 /start succeeded then 3x /help silent — Anyone deploy reverted or duplicate deployment
+- **Subagents spawned:** none
+- **Status:** ❌ FAILED
+- **Artifacts/Outputs:** getWebhookInfo now AKfycbyYL3Wg.../exec 302 pending 4 (was pending 0 after flush at 02:32); first /start at 10:33 got 1 reply but webhook still 302 -> script ran but returned redirect (auth)
+- **Next step:** Anonymous curl test + recreate Anyone deployment + defer logging
+
+
+## 2026-09-03T02:35:55Z — Phase: Diagnose 302 again
+
+- **Action:** 10:33 /start got 1 reply then 3x /help silent + 302 pending 4 — investigate Anyone deploy vs logging timeout
+- **Subagents spawned:** none
+- **Status:** ❌ FAILED — 302 Found
+- **Artifacts/Outputs:** getWebhookInfo AKfycbyYL3Wg.../exec 302 pending 4 (was 0 at 02:32); first /start after flush succeeded then 302 returned
+- **Next step:** Curl anon POST to see Location + check Executions + defer sheet logging
+
+
+## 2026-09-03T02:40:45Z — Phase: Diagnose
+
+- **Action:** Triaged sheet logs: 29357111 retried 10x over 12m, 29357114 retried 7x; /help pending 4 never delivered — GAS 302 causes Telegram retry queue
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL — 302 expected for GAS ContentService, but retry blocks next commands
+- **Artifacts/Outputs:** logs show doPost_received only for /start, duplicate_ignored for retries, no /help dispatch; curl echo 302 is normal GAS redirect
+- **Next step:** Defer spreadsheet logging off critical path + flush queue
+
