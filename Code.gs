@@ -451,10 +451,17 @@ function debugDoPostHelp() {
  var update = { update_id: 9999991, message: mockPrivateMsg_('/help', {message_id: 100}) };
  var e = { postData: { contents: JSON.stringify(update) } };
  var res = doPost(e);
- console.log('doPost res code='+res.getResponseCode()+' body='+res.getContentText());
- // second call same update_id should be duplicate_ignored
+ var body = ''; try { body = typeof res.getContent === 'function' ? res.getContent() : (typeof res.getContentText==='function'?res.getContentText(): String(res)); } catch(err){ body='err:'+err; }
+ console.log('doPost res body='+body);
+ console.log('doPost res body type='+typeof body);
+ // check duplicate
  var res2 = doPost(e);
- console.log('doPost dup res body='+res2.getContentText());
+ var body2=''; try{ body2 = typeof res2.getContent==='function'?res2.getContent(): (typeof res2.getContentText==='function'?res2.getContentText(): String(res2)); }catch(err){body2='err:'+err;}
+ console.log('doPost dup res body='+body2);
+ // also directly test cmdHelp sendMessage result
+ console.log('=== direct sendMessage payload test ===');
+ var payload = testHelpPayload_();
+ console.log('payload logged above');
 }
 
 function debugAll_() { testParse(); testHelpPayload_(); testHandleHelp(); debugDoPostHelp(); }
