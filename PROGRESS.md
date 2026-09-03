@@ -378,3 +378,84 @@
 - **Artifacts/Outputs:** 12:30 payload 466 chars received DM with literal &mdash; (HTML entity not decoded by Telegram HTML mode); pending 4 at 10:33 due to 302 considered error
 - **Next step:** Fix cmdHelp entity + harness fresh ID, verify live /help
 
+
+## 2026-09-03T04:36:14Z — Phase: Fix
+
+- **Action:** Fixed cmdHelp &mdash; entity (Telegram HTML renders literally) -> U+2014 — ; harness 9999991 stale -> freshId random
+- **Subagents spawned:** fix-entity-worker, fix-harness-worker
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** Code.gs cmdHelp line 192 now U+2014 — verified; debugDoPostHelp now freshId; 623e45a pushed
+- **Next step:** Deploy New version, rerun debugDoPostHelp should dispatch (not duplicate), live /help should render dash
+
+
+## 2026-09-03T05:28:01Z — Phase: Recon
+
+- **Action:** Re-reading https://core.telegram.org/bots/api to debug live /help 302 vs mock success
+- **Subagents spawned:** scout-worker-1, scout-worker-2
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Fetching Telegram Bot API docs (webhooks, setWebhook, responses, 302 handling)
+- **Next step:** Spawn recon batch
+
+
+## 2026-09-03T05:44:12Z — Phase: Recon
+
+- **Action:** Fetched core.telegram.org/bots/api + GAS web guides — Telegram requires 2XY, GAS ContentService always 302 to script.googleusercontent.com
+- **Subagents spawned:** scout-worker-1, scout-worker-2
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** GAS doPost -> TextOutput -> 302 echo is by design; Telegram marks 302 Found as unsuccessful (non-2XY) -> pending queue retry despite 200 downstream
+- **Next step:** Plan fix for live /help
+
+
+## 2026-09-03T05:44:33Z — Phase: Plan
+
+- **Action:** Published recon-driven plan for live /help 302 vs mock-ok divergence (GAS 302 echo by design vs Telegram 2XY requirement)
+- **Subagents spawned:** none
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Plan scope: doGet health, dedupe TTL tuning, post-reply sheet defer, pending explanation
+- **Next step:** Spawn worker batch
+
+
+## 2026-09-03T05:45:06Z — Phase: Plan
+
+- **Action:** Published verified plan after docs re-read: GAS 302 echo is by design, Telegram requires 2XY — webhook delivers + DMs arrive but Telegram logs 302 and serial-blocks queue
+- **Subagents spawned:** none
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Doc-verified fix: pending is GAS artifact, not bot death; mocks pass; live /help blocked behind 302 retry
+- **Next step:** Spawn fix batch (no code change needed, just queue explain)
+
+
+## 2026-09-03T05:45:41Z — Phase: Verify
+
+- **Action:** Re-read https://core.telegram.org/bots/api — Telegram requires 2XY webhook response; GAS ContentService always 302 to script.googleusercontent.com/macros/echo
+- **Subagents spawned:** scout-worker-1, scout-worker-2
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** Docs: Telegram setWebhook says 'response HTTP status code different from 2XY' -> repeat; GAS web guide says 'must serve content from different URL' -> 302 hop; mock harness passes because no webhook 302 involved
+- **Next step:** Explain live vs mock divergence + flush queue + verify
+
+
+## 2026-09-03T05:45:41Z — Phase: Verify
+
+- **Action:** Verified live 10:58 /start 1 reply then /help silent, sheet 12:30 help delivered via mock but live blocked by 302 retry flood + dedupe cache 600s (duplicate_ignored)
+- **Subagents spawned:** fix-entity-worker, fix-harness-worker
+- **Status:** ⚠️ PARTIAL
+- **Artifacts/Outputs:** GAS 302 echo is BY DESIGN (not 401 ServiceLogin); Telegram logs 'Wrong response: 302 Found' and pending 4 but still delivered first update; mock bypasses webhook so succeeds
+- **Next step:** Flush queue, deploy 623e45a (— fix), test single /help
+
+
+## 2026-09-03T05:49:21Z — Phase: Diagnose first-only
+
+- **Action:** Single 123 -> non_slash_ignored 05:46:42 then duplicate_ignored x5 (29357123) retries; further commands no log — GAS 302 serial block confirmed
+- **Subagents spawned:** none
+- **Status:** ❌ FAILED
+- **Artifacts/Outputs:** Log 05:46:42 blank update_id non_slash_ignored (first delivery succeeded + DM Only commands), then 44s/48s/54s/04s/22s duplicate_ignored retries; pending queue blocked per Telegram 2XY rule
+- **Next step:** Spawn polling fallback worker
+
+
+## 2026-09-03T05:50:19Z — Phase: Plan
+
+- **Action:** Plan polling fallback to replace broken GAS webhook 302 serial block (only first update ever delivered)
+- **Subagents spawned:** none
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Scope: Code.gs pollTelegram_/setupPolling/stopPolling + PropertiesService offset + 1m trigger
+- **Next step:** Spawn polling worker batch
+
