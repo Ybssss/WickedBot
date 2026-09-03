@@ -323,7 +323,7 @@ function doPost(e) {
       }
       try { dupCache.put(dupKey, '1', 600); } catch (e2) {}
     }
-    try { logUpdate_(update, null, 'doPost_received', null); } catch(_e){}
+    // logUpdate_ deferred to handleMessage to avoid pre-reply SpreadsheetApp latency (302 retry flood)
     // channel posts are handled only via AUTO_REPLY listener, not as private commands
     if (update.channel_post || update.edited_channel_post) {
       console.log('doPost: channel_post ignored (no AUTO_REPLY dispatch here)');
