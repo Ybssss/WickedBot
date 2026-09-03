@@ -99,3 +99,57 @@
 - **Status:** ✅ SUCCESS
 - **Artifacts/Outputs:** All contracts aligned, no off-limits files touched.
 - **Next step:** Finalize.
+
+## 2026-09-03T01:09:52Z — Phase: Diagnose /start silent
+
+- **Action:** Audit Code.gs doPost/handleMessage/cmdStart path; diagnose why /start produces no response.
+- **Subagents spawned:** none (direct triage)
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Reading Code.gs 371 lines, appsscript.json, git log
+- **Next step:** Static analysis + webhook/deploy checklist
+
+
+## 2026-09-03T01:11:19Z — Phase: Diagnose
+
+- **Action:** Static audit of Code.gs (371 lines) — doPost/handleMessage/cmdStart path; appsscript.json webapp config; git history
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL — root cause identified as deploy/webhook/config (see analysis to user)
+- **Artifacts/Outputs:** No code bug in /start switch path; silent implies infra failure before sendMessage
+- **Next step:** User to check getWebhookInfo + Executions + Script Properties per checklist below
+
+
+## 2026-09-03T01:15:04Z — Phase: Diagnose webhook
+
+- **Action:** getWebhookInfo returned /dev URL + token mismatch identified
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL — root cause: webhook points to /dev (auth-required), not /exec; token changed 8972406236 -> 8945572488
+- **Artifacts/Outputs:** url=https://script.google.com/macros/s/AKfycbw1fd62pmgVkxTufXvxvpAYz9KJvokjfsPXGajYBmpw/dev pending=0; props token 8945572488, channel -1001957164507
+- **Next step:** Reset webhook to /exec and verify
+
+
+## 2026-09-03T01:15:28Z — Phase: Diagnose
+
+- **Action:** webhook is https://script.google.com/macros/s/AKfycbw1fd62pmgVkxTufXvxvpAYz9KJvokjfsPXGajYBmpw/dev (auth-required) — /start never reaches doPost
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL
+- **Artifacts/Outputs:** token now 8945572488:* (was 8972406236:* on 2026-09-02); channel -1001957164507 ok, AUTO_REPLY unset ok; fix: set webhook to /exec url with Anyone access
+- **Next step:** User resets webhook to /exec per checklist below, re-check getWebhookInfo
+
+
+## 2026-09-03T01:24:10Z — Phase: Fix webhook URL mismatch
+
+- **Action:** User confirmed /exec is AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec (project 1Z9rSsI...) but webhook still points to AKfycbw1fd62.../dev — different deployment
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL — webhook reset required
+- **Artifacts/Outputs:** token 8945572488, /dev -> must be /exec on AKfycby...
+- **Next step:** setWebhook to correct /exec and verify
+
+
+## 2026-09-03T01:29:40Z — Phase: Fix setupWebhook /dev bug
+
+- **Action:** Confirmed setupWebhook uses ScriptApp.getService().getUrl() which returns /dev when run from editor — causes webhook 401
+- **Subagents spawned:** fix-webhook-worker
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Spawning worker to patch Code.gs setupWebhook to force /exec
+- **Next step:** Verify patch + git push
+

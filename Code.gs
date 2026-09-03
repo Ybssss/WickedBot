@@ -51,7 +51,8 @@ function escapeHtml(s) {
 /* --- WEBHOOK & COMMAND REGISTRATION --- */
 function setupWebhook() {
   const cfg = getConfig();
-  const url = ScriptApp.getService().getUrl();
+  let url = ScriptApp.getService().getUrl();
+  url = url.replace(/\/dev$/, '/exec');  // force /exec for Telegram anonymous access
   if (!url) throw new Error('setupWebhook: deploy as web app first');
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/setWebhook?url=' + encodeURIComponent(url) + '&drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'get', muteHttpExceptions: false });
