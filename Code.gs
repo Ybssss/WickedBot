@@ -27,6 +27,7 @@ const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const TELEGRAM_API_BASE_ = 'https://api.telegram.org';
 const LOG_SHEET_ID = '174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc';
 const LOG_SHEET_NAME = 'logs';
+const WEBHOOK_URL_ = 'https://script.google.com/macros/s/AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec';
 
 function getConfig() {
   const props = PropertiesService.getScriptProperties();
@@ -56,12 +57,10 @@ function logUpdate_(update, parsed, action, error) { try { const msg = update.me
 /* --- WEBHOOK & COMMAND REGISTRATION --- */
 function setupWebhook() {
   const cfg = getConfig();
-  let url = ScriptApp.getService().getUrl();
-  url = url.replace(/\/dev$/, '/exec');  // force /exec for Telegram anonymous access
-  if (!url) throw new Error('setupWebhook: deploy as web app first');
+  const url = WEBHOOK_URL_;
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/setWebhook?url=' + encodeURIComponent(url) + '&drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'get', muteHttpExceptions: false });
-  console.log('setupWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText());
+  console.log('setupWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText() + ' url=' + url);
   registerCommands();
 }
 
