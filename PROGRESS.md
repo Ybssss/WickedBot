@@ -198,3 +198,48 @@
 - **Artifacts/Outputs:** Plan: 2 workers (log-impl, manifest) — parallel batch, dedup safe
 - **Next step:** Spawn worker batch
 
+
+## 2026-09-03T01:53:07Z — Phase: Spawn
+
+- **Action:** Implemented spreadsheet logging to 174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc
+- **Subagents spawned:** log-impl-worker, manifest-worker
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** Code.gs LOG_SHEET_ID/logs + logToSheet_/logUpdate_ + doPost/handleMessage hooks; appsscript.json oauthScopes spreadsheets; f46a0b2 pushed to origin/master; dedupe spam fix b6ba428 included
+- **Next step:** Deploy verify (paste both files, auth spreadsheets, check sheet)
+
+
+## 2026-09-03T02:09:10Z — Phase: Diagnose post-deploy silent
+
+- **Action:** setupWebhook 200 but /start still no respond — check getWebhookInfo URL vs deployed /exec (AKfycbw1 vs AKfycby mismatch) + doPost Executions + sheet 174KDDCM logs
+- **Subagents spawned:** none
+- **Status:** ⚠️ PARTIAL — awaiting getWebhookInfo + Executions + sheet rows
+- **Artifacts/Outputs:** setupWebhook code=200 registerCommands 200 at 10:07; dedupe + logs f46a0b2 deployed
+- **Next step:** User to paste fresh getWebhookInfo + Executions after /start + sheet
+
+
+## 2026-09-03T02:10:44Z — Phase: Verify
+
+- **Action:** setupWebhook 200 but getWebhookInfo shows AKfycbw1.../exec 401 Unauthorized, pending 1 — deployment not Anyonemous
+- **Subagents spawned:** none
+- **Status:** ❌ FAILED — webhook 401
+- **Artifacts/Outputs:** url=AKfycbw1fd62.../exec pending=1 last_error=401 last_error_date=1788401392
+- **Next step:** Fix deployment access Anyone + reset webhook
+
+
+## 2026-09-03T02:14:38Z — Phase: Fix webhook URL
+
+- **Action:** User confirmed correct exec is AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec — current webhook AKfycbw1.../exec 401 pending 1 must be reset
+- **Subagents spawned:** none
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** getWebhookInfo last_error 401 on AKfycbw1; setupWebhook logs 200 but set wrong deployment
+- **Next step:** setWebhook to AKfycby.../exec with drop_pending_updates
+
+
+## 2026-09-03T02:18:05Z — Phase: Spawn
+
+- **Action:** Launched fix-webhook-url worker to hardcode setupWebhook to AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec
+- **Subagents spawned:** fix-webhook-url
+- **Status:** 🔄 IN PROGRESS
+- **Artifacts/Outputs:** Pending verification
+- **Next step:** Verify Code.gs patch and push
+
