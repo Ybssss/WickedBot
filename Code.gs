@@ -376,23 +376,24 @@ function handleMessage(msg) {
       return;
     }
     const parsed = parseCommand(text);
-    try{ logUpdate_({message: msg}, parsed, parsed ? 'parsed_'+parsed.command : 'parse_failed', null);}catch(_e){}
+    // log deferred — post-reply to avoid SpreadsheetApp latency before sendMessage (302 retry flood)
     if (!parsed) {
-      try{ logUpdate_({message: msg}, null, 'parse_failed', null);}catch(_e){}
       sendMessage(msg.chat.id, 'Could not parse command. Type /help.');
+      try{ logUpdate_({message: msg}, null, 'parse_failed', null);}catch(_e){}
       return;
     }
-    try{ logUpdate_({message: msg}, parsed, 'dispatch_'+parsed.command, null);}catch(_e){}
     switch (parsed.command) {
-      case 'start': return cmdStart(msg);
-      case 'help': return cmdHelp(msg);
-      case 'comment': return cmdComment(msg, parsed.args);
-      case 'roast': return cmdComment(msg, parsed.args);
-      case 'confess': return cmdConfess(msg, parsed.args);
-      case 'reply': return cmdReply(msg, parsed.args);
-      case 'setchannel': return cmdSetChannel(msg, parsed.args);
+      case 'start': cmdStart(msg); break;
+      case 'help': cmdHelp(msg); break;
+      case 'comment': cmdComment(msg, parsed.args); break;
+      case 'roast': cmdComment(msg, parsed.args); break;
+      case 'confess': cmdConfess(msg, parsed.args); break;
+      case 'reply': cmdReply(msg, parsed.args); break;
+      case 'setchannel': cmdSetChannel(msg, parsed.args); break;
       default: sendMessage(msg.chat.id, 'Unknown command. Type /help.');
     }
+    try{ logUpdate_({message: msg}, parsed, 'dispatch_'+parsed.command, null);}catch(_e){}
+    return;
   } catch (err) {
     console.error('handleMessage: error:', err);
     try{ logUpdate_({message: msg||{}}, null, 'handle_error', err);}catch(_e){}
