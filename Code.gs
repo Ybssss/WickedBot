@@ -52,13 +52,17 @@ function escapeHtml(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function logToSheet_(row) { try { const ss = SpreadsheetApp.openById(LOG_SHEET_ID); let sh = ss.getSheetByName(LOG_SHEET_NAME); if (!sh) { sh = ss.insertSheet(LOG_SHEET_NAME); sh.appendRow(['timestamp','update_id','chat_id','chat_type','user_id','username','text','parsed_command','action','error','webhook_url']); } sh.appendRow(row); } catch (e) { console.error('logToSheet_:', e); } }
+let _logSheetCache_ = null;
+function logToSheet_(row) { try { if (!_logSheetCache_) { const ss = SpreadsheetApp.openById(LOG_SHEET_ID); let sh = ss.getSheetByName(LOG_SHEET_NAME); if (!sh) { sh = ss.insertSheet(LOG_SHEET_NAME); sh.appendRow(['timestamp','update_id','chat_id','chat_type','user_id','username','text','parsed_command','action','error','webhook_url']); } _logSheetCache_ = sh; } _logSheetCache_.appendRow(row); } catch (e) { _logSheetCache_ = null; console.error('logToSheet_:', e); } }
 function logUpdate_(update, parsed, action, error) { try { const msg = update.message || update.channel_post || update.edited_message || {}; const chat = msg.chat || {}; const from = msg.from || {}; const text = msg.text || JSON.stringify(update).substring(0,500); const row = [ new Date().toISOString(), update.update_id || '', chat.id || '', chat.type || (update.channel_post ? 'channel' : ''), from.id || '', from.username || '', String(text).substring(0,500), parsed ? parsed.command : '', action || '', error ? String(error).substring(0,500) : '', '' ]; logToSheet_(row); } catch(e){} }
 
 /* --- WEBHOOK & COMMAND REGISTRATION --- */
 function setupWebhook() {
   const cfg = getConfig();
   const url = WEBHOOK_URL_;
+  // Stop polling triggers before switching to webhook to avoid dual delivery
+  const triggers = ScriptApp.getProjectTriggers();
+  for (let i = 0; i < triggers.length; i++) if (triggers[i].getHandlerFunction() === 'pollTelegram_') ScriptApp.deleteTrigger(triggers[i]);
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/setWebhook?url=' + encodeURIComponent(url) + '&drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'get', muteHttpExceptions: false });
   console.log('setupWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText() + ' url=' + url);
@@ -75,6 +79,7 @@ function deleteWebhook() {
 function pollTelegram_() {
   const cfg = getConfig();
   const props = PropertiesService.getScriptProperties();
+  const dupCache = CacheService.getScriptCache();
   let offset = parseInt(props.getProperty('POLL_OFFSET') || '0', 10);
   if (isNaN(offset)) offset = 0;
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/getUpdates?timeout=5&limit=20&offset=' + offset;
@@ -87,16 +92,20 @@ function pollTelegram_() {
   for (let i=0;i<data.result.length;i++) {
     const update = data.result[i];
     const uid = update.update_id;
+    // Skip already-processed updates (same dedup as doPost webhook)
+    if (uid !== undefined && uid !== null) {
+      const dupKey = 'upd_' + String(uid);
+      if (dupCache.get(dupKey)) { console.log('pollTelegram_: duplicate update_id ' + uid + ' skipped'); continue; }
+      try { dupCache.put(dupKey, '1', 600); } catch (e2) {}
+    }
     if (uid >= maxId) maxId = uid + 1;
     try {
       if (update.message) handleMessage(update.message);
-      else if (update.channel_post) {
-        const chId = getChannelId();
-        const autoOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
-        if (autoOn && chId && update.channel_post.chat && String(update.channel_post.chat.id)===String(chId) && update.channel_post.text && !update.channel_post.from.is_bot) {
-          let c; try{ c=generateComment(String(update.channel_post.text).trim(), ''); }catch(e){}
-          if (c) sendMessage(chId, '<b>Comment:</b>\n\n'+c, {replyToMessageId: update.channel_post.message_id});
-        }
+      const chId = getChannelId();
+      const autoOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
+      if (autoOn && chId && update.channel_post && String(update.channel_post.chat.id) === String(chId) && update.channel_post.text && !update.channel_post.from.is_bot) {
+        let c; try{ c=generateComment(String(update.channel_post.text).trim(), ''); }catch(e){}
+        if (c) sendMessage(chId, '<b>Comment:</b>\n\n'+c, {replyToMessageId: update.channel_post.message_id});
       }
     } catch(e){ console.error('pollTelegram_ handle', e); }
     try { props.setProperty('POLL_OFFSET', String(maxId)); } catch(e){}
@@ -105,7 +114,10 @@ function pollTelegram_() {
 
 function setupPolling() {
   deleteWebhook();
-  PropertiesService.getScriptProperties().setProperty('POLL_OFFSET', '0');
+  const props = PropertiesService.getScriptProperties();
+  let existing = props.getProperty('POLL_OFFSET');
+  // Only reset if missing; don't rewind and replay the entire queue.
+  if (!existing) props.setProperty('POLL_OFFSET', '0');
   const triggers = ScriptApp.getProjectTriggers();
   for (let i=0;i<triggers.length;i++) if (triggers[i].getHandlerFunction()==='pollTelegram_') ScriptApp.deleteTrigger(triggers[i]);
   ScriptApp.newTrigger('pollTelegram_').timeBased().everyMinutes(1).create();
@@ -372,12 +384,12 @@ function doPost(e) {
       try { dupCache.put(dupKey, '1', 600); } catch (e2) {}
     }
     // logUpdate_ deferred to handleMessage to avoid pre-reply SpreadsheetApp latency (302 retry flood)
-    // channel posts are handled only via AUTO_REPLY listener, not as private commands
-    if (update.channel_post || update.edited_channel_post) {
-      console.log('doPost: channel_post ignored (no AUTO_REPLY dispatch here)');
-      try { logUpdate_(update, null, 'channel_post_ignored', null); } catch(_e){}
+    // channel posts: dispatch to handleMessage so the AUTO_REPLY listener can fire
+    if (update.channel_post) {
+      handleMessage(update.channel_post);
       return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
     }
+    if (update.edited_channel_post) { console.log('doPost: edited_channel_post ignored'); return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON); }
     if (update.message) handleMessage(update.message);
     else if (update.edited_message) console.log('doPost: edited_message ignored');
     else if (update.callback_query) console.log('doPost: callback_query ignored');
@@ -412,22 +424,19 @@ function handleMessage(msg) {
       return;
     }
     if (msg.chat.type !== 'private') {
-      try{ logUpdate_({message: msg}, null, 'non_private_ignored', null);}catch(_e){}
       sendMessage(msg.chat.id, escapeHtml(PRIVATE_ONLY_MESSAGE));
+      try{ logUpdate_({message: msg}, null, 'non_private_ignored', null);}catch(_e){}
       return;
     }
     const text = (msg.text || '').trim();
     if (text.length === 0) { try{ logUpdate_({message: msg}, null, 'empty_text', null);}catch(_e){} return; }
     if (text.charAt(0) !== '/') {
-      try{ logUpdate_({message: msg}, null, 'non_slash_ignored', null);}catch(_e){}
       sendMessage(msg.chat.id, 'Only commands. Type /help.');
       return;
     }
     const parsed = parseCommand(text);
-    // log deferred — post-reply to avoid SpreadsheetApp latency before sendMessage (302 retry flood)
     if (!parsed) {
       sendMessage(msg.chat.id, 'Could not parse command. Type /help.');
-      try{ logUpdate_({message: msg}, null, 'parse_failed', null);}catch(_e){}
       return;
     }
     switch (parsed.command) {
