@@ -415,7 +415,7 @@ function handleMessage(msg) {
     const autoReplyOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
     const chId = getChannelId();
     // Channel listener: opt-in via AUTO_REPLY script property
-    if (autoReplyOn && chId && String(msg.chat.id) === String(chId) && msg.text && msg.from && msg.from.is_bot !== true) {
+    if (autoReplyOn && chId && String(msg.chat.id) === String(chId) && msg.text && !(msg.from && msg.from.is_bot === true)) {
       const trimmed = String(msg.text).trim();
       if (trimmed.charAt(0) !== '/') {
         let c; try { c = generateComment(trimmed, ''); } catch (e) { console.error('listener:', e); }
