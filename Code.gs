@@ -28,7 +28,6 @@ const TELEGRAM_API_BASE_ = 'https://api.telegram.org';
 const LOG_SHEET_ID = '174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc';
 const LOG_SHEET_NAME = 'logs';
 const WEBHOOK_URL_ = 'https://script.google.com/macros/s/AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec';
-const USE_POLLING_ = true;
 
 function getConfig() {
   const props = PropertiesService.getScriptProperties();
@@ -100,13 +99,11 @@ function pollTelegram_() {
     }
     if (uid >= maxId) maxId = uid + 1;
     try {
+      // Single listener: channel posts go through handleMessage as well, so the
+      // AUTO_REPLY check lives in exactly one place. That copy guards `from`,
+      // which is normally absent on channel_post (Telegram sends sender_chat).
       if (update.message) handleMessage(update.message);
-      const chId = getChannelId();
-      const autoOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
-      if (autoOn && chId && update.channel_post && String(update.channel_post.chat.id) === String(chId) && update.channel_post.text && !update.channel_post.from.is_bot) {
-        let c; try{ c=generateComment(String(update.channel_post.text).trim(), ''); }catch(e){}
-        if (c) sendMessage(chId, '<b>Comment:</b>\n\n'+c, {replyToMessageId: update.channel_post.message_id});
-      }
+      else if (update.channel_post) handleMessage(update.channel_post);
     } catch(e){ console.error('pollTelegram_ handle', e); }
     try { props.setProperty('POLL_OFFSET', String(maxId)); } catch(e){}
   }
@@ -127,8 +124,7 @@ function setupPolling() {
 function stopPolling() {
   const triggers = ScriptApp.getProjectTriggers();
   for (let i=0;i<triggers.length;i++) if (triggers[i].getHandlerFunction()==='pollTelegram_') ScriptApp.deleteTrigger(triggers[i]);
-  console.log('stopPolling: removed poll triggers');
-  setupWebhook();
+  console.log('stopPolling: removed poll triggers. Webhook NOT re-armed — call setupWebhook() explicitly if you really want it.');
 }
 
 function registerCommands() {
@@ -255,7 +251,7 @@ function cmdHelp(msg) {
   for (let i = 0; i < COMMANDS.length; i++) { lines.push('/' + COMMANDS[i].name + ' — ' + escapeHtml(COMMANDS[i].description)); }
   lines.push('\nAdmins can also use /setchannel to configure the channel.');
   const on = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
-  if (on) lines.push('\nAuto-reply is <b>on</b> &mdash; the bot comments on every new channel post.');
+  if (on) lines.push('\nAuto-reply is <b>on</b> — the bot comments on every new channel post.');
   sendMessage(msg.chat.id, lines.join('\n'));
 }
 
@@ -294,6 +290,7 @@ function cmdConfess(msg, args) {
 function cmdReply(msg, args) {
   const raw = (args || '').trim();
   if (!raw) { sendMessage(msg.chat.id, 'Usage: <code>/reply &lt;message_id&gt; [hint]</code>'); return; }
+  if (checkRateLimit(msg.from.id, 'reply')) { sendMessage(msg.chat.id, 'Slow down. Try again in a minute.'); return; }
   const spaceIdx = raw.search(/\s/);
   const idStr = (spaceIdx === -1) ? raw : raw.substring(0, spaceIdx);
   const hint = (spaceIdx === -1) ? '' : raw.substring(spaceIdx + 1).trim();
@@ -423,6 +420,9 @@ function handleMessage(msg) {
       }
       return;
     }
+    // Never nag channel chats. With AUTO_REPLY off, a channel post must be
+    // ignored silently rather than answered with the "DM me" notice.
+    if (msg.chat.type === 'channel') { console.log('handleMessage: channel post ignored (auto-reply off)'); try{ logUpdate_({message: msg}, null, 'channel_ignored', null);}catch(_e){} return; }
     if (msg.chat.type !== 'private') {
       sendMessage(msg.chat.id, escapeHtml(PRIVATE_ONLY_MESSAGE));
       try{ logUpdate_({message: msg}, null, 'non_private_ignored', null);}catch(_e){}
@@ -494,7 +494,7 @@ function testHandleHelp() {
 function testHelpPayload_() {
  // what sendMessage would send for /help
  var lines = ['<b>Available commands</b>\n'];
- for (var i=0;i<COMMANDS.length;i++) lines.push('/'+COMMANDS[i].name+' &mdash; '+escapeHtml(COMMANDS[i].description));
+ for (var i=0;i<COMMANDS.length;i++) lines.push('/'+COMMANDS[i].name+' — '+escapeHtml(COMMANDS[i].description));
  lines.push('\nAdmins can also use /setchannel to configure the channel.');
  var payload = lines.join('\n');
  console.log('help payload len='+payload.length);

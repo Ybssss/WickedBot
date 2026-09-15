@@ -1,5 +1,38 @@
 # Ares Orchestration Log
 
+> **Status snapshot — updated 2026-09-15T17:35+08:00**
+>
+> **Current focus:** Bug-fix batch #1 is in the working tree, **not committed and not deployed** — awaiting a paste into the GAS editor to verify live.
+> **Last code change:** 2026-09-15 (uncommitted) — channel auto-reply fix, `&mdash;` fix, `stopPolling` no longer re-arms the webhook. Last commit is still `395f6c4` (2026-09-06 17:48).
+> **Last verified working:** 2026-09-06, polling mode. Nothing verified since.
+>
+> **Known issues / blockers**
+> 1. **GAS webhook is unusable — do not go back to it.** Apps Script `ContentService` always answers with a 302 echo; Telegram treats any non-2XY as a failed delivery and serial-retries, so only the *first* update ever got through. **Workaround shipped:** polling mode (`pollTelegram_` + `setupPolling` + 1-min trigger). `setupWebhook` remains in the file for reference only.
+> 2. **Deployed `Code.gs` drifts from the repo.** Code is pasted into the GAS editor by hand; several past "bugs" were really a stale or truncated editor copy. Before debugging logic, confirm the deployed file matches `HEAD`.
+> 3. **Gemini API key was pasted into chat on 2026-09-02** — treat as compromised and rotate at https://aistudio.google.com/apikey. The repo itself is clean (`git grep` verified).
+> 4. **PROGRESS.md had gone stale** — commits `bcb3d91`, `38dde04`, `395f6c4` had no entries. Now recorded below (2026-09-06 catch-up).
+> 5. ~~**`pollTelegram_` auto-reply broken for anonymous channel posts** (`Code.gs:106`, unguarded `update.channel_post.from.is_bot` → `TypeError` swallowed by the catch).~~ **FIXED 2026-09-15.** `pollTelegram_` now forwards `channel_post` to `handleMessage` (one listener), and `handleMessage` got a `chat.type === 'channel'` guard so auto-reply-off posts are ignored silently instead of being nagged with "talk to me in private".
+> 6. ~~**`cmdHelp` emits a literal `&mdash;`** at `Code.gs:258`.~~ **FIXED 2026-09-15** — replaced with U+2014; same fix applied to the mirror in `testHelpPayload_`.
+> 7. ~~**`stopPolling()` calls `setupWebhook()`** (`Code.gs:131`).~~ **FIXED 2026-09-15** — call removed; it now only drops triggers and says so in the log.
+> 8. ~~**`USE_POLLING_` dead constant.**~~ **FIXED 2026-09-15** — removed.
+> 9. ~~**README is stale** — "Roasting Bot", four files that no longer exist, tells you to run `setupWebhook`.~~ **FIXED 2026-09-15** — rewritten for polling, the single-file layout, and the current command set.
+> 10. ~~**Auto-reply duplicated** / **`cmdReply` unrate-limited.**~~ **FIXED 2026-09-15** — duplication removed as part of #5; `cmdReply` now goes through `checkRateLimit` like the others.
+
+> All ten findings from the 2026-09-15 review are now closed. Remaining work is verification and deployment, not code.
+
+> **Established decisions (settled — don't relitigate)**
+> - **Single-file `Code.gs`.** The multi-file GAS editor proved unreliable; everything lives in one file.
+> - **camelCase function names**, no trailing underscores except genuinely private helpers (`pollTelegram_`, `logToSheet_`, `mockPrivateMsg_`).
+> - **Model:** default `gemini-2.5-flash-lite`, overridable via the `GEMINI_MODEL` script property. `gemini-3.1-flash-lite` was a typo, not a real model.
+> - **All secrets live in Script Properties:** `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `ADMIN_IDS`, `CONFESSION_CHANNEL_ID`, `AUTO_REPLY`. Nothing hardcoded.
+> - **Webhook/exec URL** (hardcoded as `WEBHOOK_URL_`): `AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec`. Deployment access must be **Anyone**; `/dev` URLs are auth-walled and return 401/302.
+> - **Logging** goes to spreadsheet `174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc` and **must stay off the reply hot path** — pre-reply `SpreadsheetApp` calls are what caused the retry flood.
+> - **Dedupe** by `update_id` (600 s cache); ignore `is_bot` messages and non-slash channel chatter.
+>
+> **Next steps:** (1) paste the updated `Code.gs` into the GAS editor, deploy a new version, then verify `/help` renders a real dash and that channel auto-reply fires (set `AUTO_REPLY=true` first); (2) commit the fix batch + `codegraph.json`; (3) rewrite README for polling and the current command set (#9); (4) rate-limit `cmdReply` (#10).
+
+---
+
 ## 2026-09-02T03:45:00Z — Phase: Push
 
 - **Action:** Configured `origin` → https://github.com/Ybssss/WickedBot.git. Initial commit `74d0a57` pushed to `master`. GitHub push protection blocked the first attempt because PROGRESS.md briefly contained the real Gemini API key pasted by the user; redacted the key from PROGRESS.md and amended the commit. Verified the key is nowhere in the pushed commit (`git grep` clean). Note: the key was also visible in the chat session and should be considered compromised regardless of repo state — recommend rotation at https://aistudio.google.com/apikey.
@@ -10,7 +43,7 @@
 
 ## 2026-09-02T03:46:00Z — Phase: Deploy + Fix em-dash + registerCommands_
 
-- **Action:** User provided GAS project URL (1Z9rSsI4eR5yilleNLCylZopS8BrDGfI5dm4s17U1kL6wyzkcA5qNnWla), web app URL (AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec), bot token (***REMOVED***), gemini key, admin id 1790450430. Registered webhook (Telegram getWebhookInfo confirmed). User reported `/start` works but `/help` silent. Root cause: em-dash U+2014 in cmdHelp_ rejected by Telegram's HTML parser. Fixed: replaced `—` with `&mdash;` in Bot.gs; added `registerCommands_` in Telegram.gs so `/` placeholder shows commands. Committed + pushed. User attempted re-deploy multiple times; /help remains silent because deployed `Bot.gs` in editor is truncated. User confirmed `ConfessionBot` reference uses single-file pattern (more reliable for GAS). After multiple deployment attempts, user reported "no function" in editor dropdown even after pasting new content. User then suggested underscore-suffixed function names might be the issue. While underscores ARE valid in GAS function names, the user's editor clearly has a parse issue. Consolidated all four files into a single Code.gs (https://github.com/Ybssss/WickedBot/blob/master/Code.gs) and renamed all underscore-suffixed functions to clean camelCase (cmdStart, cmdHelp, cmdComment, cmdConfess, cmdReply, cmdSetChannel, getConfig, escapeHtml, isAdmin, registerCommands, etc.) so the deployed file is bulletproof. Bot token changed to ***REMOVED***; webhook re-registered.
+- **Action:** User provided GAS project URL (1Z9rSsI4eR5yilleNLCylZopS8BrDGfI5dm4s17U1kL6wyzkcA5qNnWla), web app URL (AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec), bot token (8972406236:… redacted), gemini key, admin id 1790450430. Registered webhook (Telegram getWebhookInfo confirmed). User reported `/start` works but `/help` silent. Root cause: em-dash U+2014 in cmdHelp_ rejected by Telegram's HTML parser. Fixed: replaced `—` with `&mdash;` in Bot.gs; added `registerCommands_` in Telegram.gs so `/` placeholder shows commands. Committed + pushed. User attempted re-deploy multiple times; /help remains silent because deployed `Bot.gs` in editor is truncated. User confirmed `ConfessionBot` reference uses single-file pattern (more reliable for GAS). After multiple deployment attempts, user reported "no function" in editor dropdown even after pasting new content. User then suggested underscore-suffixed function names might be the issue. While underscores ARE valid in GAS function names, the user's editor clearly has a parse issue. Consolidated all four files into a single Code.gs (https://github.com/Ybssss/WickedBot/blob/master/Code.gs) and renamed all underscore-suffixed functions to clean camelCase (cmdStart, cmdHelp, cmdComment, cmdConfess, cmdReply, cmdSetChannel, getConfig, escapeHtml, isAdmin, registerCommands, etc.) so the deployed file is bulletproof. Bot token changed to 8945572488:… (redacted); webhook re-registered.
 - **Subagents spawned:** none
 - **Status:** ✅ SUCCESS — single-file `Code.gs` ready. User needs to paste into GAS editor.
 - **Artifacts/Outputs:** commit `72876b4` (single-file Code.gs with clean function names). Repo: https://github.com/Ybssss/WickedBot
@@ -458,4 +491,48 @@
 - **Status:** 🔄 IN PROGRESS
 - **Artifacts/Outputs:** Scope: Code.gs pollTelegram_/setupPolling/stopPolling + PropertiesService offset + 1m trigger
 - **Next step:** Spawn polling worker batch
+
+## 2026-09-06T17:00:00+08:00 — Phase: Catch-up (unlogged commits)
+
+- **Action:** Recorded three commits that shipped without PROGRESS entries: `bcb3d91` polling fallback (`pollTelegram_`/`setupPolling`/`stopPolling`, PropertiesService offset, 1-min trigger) replacing the broken webhook; `38dde04` replay-loop fix (poll dedup + offset fix + trigger cleanup, plus sheet cache / deferred log / atomic offset / auto-reply fix); `395f6c4` allow anonymous `channel_post` with no `msg.from` to trigger a reply.
+- **Subagents spawned:** none (retroactive entry)
+- **Status:** ✅ SUCCESS (shipped) / ⚠️ live behaviour not re-verified after `395f6c4`
+- **Artifacts/Outputs:** Code.gs at 28,788 bytes, 39 functions — polling path live, webhook path retained but unused.
+- **Next step:** End-to-end verify in polling mode: DM `/start`, `/help`, `/comment x`, `/confess x`, then post in channel and confirm the auto-reply threads under it.
+
+## 2026-09-15T17:35:00+08:00 — Phase: Tooling (CodeGraph init)
+
+- **Action:** Ran `codegraph init` (v1.6.0) at the project root. First pass indexed **0 files** — `.gs` is not a built-in extension. Added `codegraph.json` mapping `".gs": "javascript"` (Apps Script runs on the V8 JS engine), then re-ran `codegraph index`: **1 file, 53 nodes, 183 edges** (41 functions, 9 constants, 2 variables, 1 file). Verified the graph is real via `codegraph query doPost` → `Code.gs:368`, and `codegraph callees doPost` → `logUpdate_`, `handleMessage`, `sendMessage`.
+- **Subagents spawned:** none
+- **Status:** ✅ SUCCESS
+- **Artifacts/Outputs:** `.codegraph/codegraph.db` (0.35 MB; self-ignored by the `.codegraph/.gitignore` codegraph writes). New `codegraph.json` at root. Both currently untracked in git.
+- **Next step:** Commit `codegraph.json` and `.codegraph/.gitignore`. Use `codegraph sync` after edits (or `codegraph index` to rebuild). Optional: `codegraph install` to expose `codegraph_explore` / `codegraph_node` as MCP tools.
+- **Caveat:** Do **not** `git rm` anything under `.codegraph/` — removing the directory's `.gitignore` un-ignores the whole folder and a previous `git rm -f .codegraph/.gitignore` recycled the entire directory including the untracked database. Use `codegraph uninit` instead if it ever needs to go.
+
+## 2026-09-15T18:00:00+08:00 — Phase: Code review / orientation
+
+- **Action:** Read `Code.gs` end to end (525 lines, 39 functions) plus `appsscript.json`, `CHANGELOG.md`, and re-read `README.md` against the code. No changes made — orientation pass only. Confirmed architecture: single-file GAS, polling ingress (`pollTelegram_` + 1-min trigger), `update_id` dedupe (600 s CacheService), `handleMessage` routing (private commands / channel auto-reply / non-private redirect), `generateComment()` → Gemini `gemini-2.5-flash-lite`, output posted to `CONFESSION_CHANNEL_ID`. Also confirmed `doPost` is now unreachable and the mock harness (`testParse`…`debugAll_`) is editor-only.
+- **Subagents spawned:** none
+- **Status:** ✅ SUCCESS (read-only) — 6 new issues found, all logged under Known Issues above (#5–#10)
+- **Artifacts/Outputs:** Findings: unguarded `channel_post.from.is_bot` at line 106 (auto-reply will throw on anonymous posts); leftover `&mdash;` at line 258; `stopPolling()` re-enables the dead webhook; `USE_POLLING_` unused; README describes a 4-file layout and a `/roast`-era command set that no longer exist; auto-reply logic duplicated with only the buggy copy live.
+- **Next step:** Fix in priority order — (1) guard line 106 and route `channel_post` through `handleMessage` so there's one listener, (2) replace `&mdash;` at 258 with U+2014, (3) make `stopPolling()` not call `setupWebhook()`, (4) rewrite README for polling + current commands. Ask before editing code.
+
+## 2026-09-15T18:10:00+08:00 — Phase: Fix batch #1
+
+- **Action:** Applied fixes for issues #5, #6, #7 (and the duplication half of #10), all in `Code.gs`:
+  1. `pollTelegram_` (line 102-108) — deleted the duplicated inline auto-reply block; it now forwards `update.channel_post` to `handleMessage` alongside `update.message`, so the only listener is the correctly-guarded one. Added a `msg.chat.type === 'channel'` early return in `handleMessage` (line 425, logs `channel_ignored`) so that with `AUTO_REPLY` off, channel posts are ignored silently instead of getting the "Please talk to me in a private chat" nag posted into the channel — that was the regression risk introduced by routing channel posts through `handleMessage`.
+  2. `cmdHelp` line 258 — `&mdash;` → U+2014; same swap in the `testHelpPayload_` mirror so the mock reproduces the real payload.
+  3. `stopPolling()` — removed the trailing `setupWebhook()` call; it now only deletes triggers and logs that the webhook was not re-armed.
+- **Subagents spawned:** none
+- **Status:** ✅ SUCCESS — syntax-checked by copying to a `.js` temp and running `node --check` (note: `node --check` rejects a `.gs` extension outright with `ERR_UNKNOWN_FILE_EXTENSION`, so copy first). `codegraph sync` re-ran clean: 1 changed file, 53 nodes.
+- **Artifacts/Outputs:** `Code.gs` edited in place, **uncommitted**. Verification grep: no `&mdash;` remains, no unguarded `.from.is_bot`, only definition of `setupWebhook` remains.
+- **Next step:** Paste `Code.gs` into the GAS editor, New deployment → Anyone, run `setupPolling`, set `AUTO_REPLY=true`, then post in the channel and confirm a threaded comment appears. Then commit.
+
+## 2026-09-15T19:25:00+08:00 — Phase: Fix batch #2 (closes out the review)
+
+- **Action:** Closed the last three findings. (a) Removed the dead `USE_POLLING_` constant. (b) Added `checkRateLimit(msg.from.id, 'reply')` to `cmdReply`, matching `cmdComment`/`cmdConfess`. (c) Rewrote `README.md` completely — it now documents polling (not the webhook), the single-file `Code` layout with an explicit "don't split it up" note, the real command set including `/roast` as a `/comment` alias, the full Script Properties table, the `AUTO_REPLY` behaviour, the `sender_chat`-not-`from` gotcha, the log sheet and mock harness, and that a web app deployment is only needed for the webhook path.
+- **Subagents spawned:** none
+- **Status:** ✅ SUCCESS — `node --check` clean (via `.js` temp copy); `codegraph sync` reports 52 nodes, down from 53, which is exactly the removed constant.
+- **Artifacts/Outputs:** `Code.gs`, `README.md`, `CHANGELOG.md` edited; all uncommitted at this point.
+- **Next step:** Commit everything (fixes + `codegraph.json` + `.codegraph/.gitignore`), then hand off to the user for the paste-and-deploy verification.
 
