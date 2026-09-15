@@ -2,9 +2,9 @@
 
 > **Status snapshot — updated 2026-09-15T17:35+08:00**
 >
-> **Current focus:** Bug-fix batch #1 is in the working tree, **not committed and not deployed** — awaiting a paste into the GAS editor to verify live.
-> **Last code change:** 2026-09-15 (uncommitted) — channel auto-reply fix, `&mdash;` fix, `stopPolling` no longer re-arms the webhook. Last commit is still `395f6c4` (2026-09-06 17:48).
-> **Last verified working:** 2026-09-06, polling mode. Nothing verified since.
+> **Current focus:** All ten review findings are closed and committed as `f4a2068` (not pushed). Nothing in flight — what's left is deployment and live verification, which happens in your GAS editor, not here.
+> **Last code change:** `f4a2068` (2026-09-15) — fix batches #1 + #2: channel auto-reply, `/help` dash, `stopPolling`, `cmdReply` rate limit, dead constant removed, README rewritten, `codegraph.json` added, tokens redacted.
+> **Last verified working:** 2026-09-06, polling mode. **Nothing since has been run live** — `f4a2068` is verified by syntax check and reading only.
 >
 > **Known issues / blockers**
 > 1. **GAS webhook is unusable — do not go back to it.** Apps Script `ContentService` always answers with a 302 echo; Telegram treats any non-2XY as a failed delivery and serial-retries, so only the *first* update ever got through. **Workaround shipped:** polling mode (`pollTelegram_` + `setupPolling` + 1-min trigger). `setupWebhook` remains in the file for reference only.
@@ -19,6 +19,8 @@
 > 10. ~~**Auto-reply duplicated** / **`cmdReply` unrate-limited.**~~ **FIXED 2026-09-15** — duplication removed as part of #5; `cmdReply` now goes through `checkRateLimit` like the others.
 
 > All ten findings from the 2026-09-15 review are now closed. Remaining work is verification and deployment, not code.
+>
+> **Security — still open and the most urgent thing here:** two raw Telegram bot tokens were committed inside `PROGRESS.md` on 2026-09-02/03 and are in the **pushed** history on GitHub. They were redacted from the working file in `f4a2068`, but redaction does not rewrite history. **Revoke via BotFather** (`/revoke`, then `/token`) and update the `TELEGRAM_BOT_TOKEN` script property. Separately, the Gemini key was exposed in chat on 09-02 — rotate that too if it hasn't been.
 
 > **Established decisions (settled — don't relitigate)**
 > - **Single-file `Code.gs`.** The multi-file GAS editor proved unreliable; everything lives in one file.
@@ -29,7 +31,11 @@
 > - **Logging** goes to spreadsheet `174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc` and **must stay off the reply hot path** — pre-reply `SpreadsheetApp` calls are what caused the retry flood.
 > - **Dedupe** by `update_id` (600 s cache); ignore `is_bot` messages and non-slash channel chatter.
 >
-> **Next steps:** (1) paste the updated `Code.gs` into the GAS editor, deploy a new version, then verify `/help` renders a real dash and that channel auto-reply fires (set `AUTO_REPLY=true` first); (2) commit the fix batch + `codegraph.json`; (3) rewrite README for polling and the current command set (#9); (4) rate-limit `cmdReply` (#10).
+> **Next steps — none of them are code:**
+> 1. **Rotate the Telegram bot token** via BotFather. Two raw tokens are in pushed git history (see Security note below). Nothing else should happen before this.
+> 2. Paste `Code.gs` into the GAS editor (single file named `Code`) and deploy a new version.
+> 3. Run `setupPolling`, set `AUTO_REPLY=true`, then confirm `/help` shows a real dash and that a channel post gets a threaded comment.
+> 4. `git push` once verified.
 
 ---
 
@@ -535,4 +541,12 @@
 - **Status:** ✅ SUCCESS — `node --check` clean (via `.js` temp copy); `codegraph sync` reports 52 nodes, down from 53, which is exactly the removed constant.
 - **Artifacts/Outputs:** `Code.gs`, `README.md`, `CHANGELOG.md` edited; all uncommitted at this point.
 - **Next step:** Commit everything (fixes + `codegraph.json` + `.codegraph/.gitignore`), then hand off to the user for the paste-and-deploy verification.
+
+## 2026-09-15T19:58:00+08:00 — Phase: Commit
+
+- **Action:** Committed everything as `f4a2068` — `Code.gs` (both fix batches), `README.md` (rewrite), `CHANGELOG.md`, `PROGRESS.md` (findings + token redactions), `.gitignore` (added `.workbuddy-ai/` so agent memory stays out of git), `codegraph.json`, `.codegraph/.gitignore`. Ran a pre-commit secret scan (`git grep -E "AIza[0-9A-Za-z_-]{20,}|[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}"`): 2 hits before redaction, 0 after.
+- **Subagents spawned:** none
+- **Status:** ✅ SUCCESS committed — **deliberately not pushed**; branch is 1 commit ahead of `origin/master`
+- **Artifacts/Outputs:** `f4a2068`, 7 files changed, +218/-70. New: `codegraph.json`, `.codegraph/.gitignore`.
+- **Next step:** Rotate the Telegram bot token before anything else. Then paste `Code.gs` into the GAS editor, deploy a new version, run `setupPolling`, verify, and push.
 
