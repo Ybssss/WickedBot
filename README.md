@@ -67,6 +67,7 @@ isn't a slash command gets "Only commands. Type /help."
    | `CONFESSION_CHANNEL_ID` | no | Numeric like `-1001234567890`, or `@channelname`. Can also be set later via `/setchannel`. |
    | `AUTO_REPLY` | no | Set to `true` to comment on every new channel post. Anything else (or unset) means off. |
    | `GEMINI_MODEL` | no | Overrides the default model. |
+   | `WEBHOOK_SECRET` | no | If set, the webhook URL gains `?secret=` and `doPost` rejects requests without a matching secret or `X-Webhook-Secret` header. |
 
    `POLL_OFFSET` is written automatically — don't set it by hand.
 

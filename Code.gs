@@ -9,6 +9,7 @@
    3. Paste this entire file (from line 1 to end) into that file.
    4. Set Script Properties (gear icon):
       TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, ADMIN_IDS, AUTO_REPLY, CONFESSION_CHANNEL_ID
+      WEBHOOK_SECRET (optional; if set, webhook URL gains ?secret= and doPost rejects requests without it)
    5. Deploy -> New deployment -> Web app -> Anyone -> Deploy. Copy URL.
    6. Open editor dropdown -> select 'registerCommands': Run (one-time).
    7. DM bot /start -> should respond. /help -> command list.
@@ -28,6 +29,9 @@ const TELEGRAM_API_BASE_ = 'https://api.telegram.org';
 const LOG_SHEET_ID = '174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc';
 const LOG_SHEET_NAME = 'logs';
 const WEBHOOK_URL_ = 'https://script.google.com/macros/s/AKfycbyYL3WgUNBGRNwN06EJu9XsQLaqW0E-K1T3SjDjDRi9Dwz5Y3pw0zdWfDd9MpdHZI5l-Q/exec';
+const WEBHOOK_SECRET_HEADER_ = 'X-Webhook-Secret';
+const WEBHOOK_SECRET_PARAM_ = 'secret';
+const CHANNEL_REPLY_MIN_HARD_ = 15;
 
 function getConfig() {
   const props = PropertiesService.getScriptProperties();
@@ -35,7 +39,8 @@ function getConfig() {
   if (!token) throw new Error('Missing TELEGRAM_BOT_TOKEN in Script Properties');
   const geminiKey = props.getProperty('GEMINI_API_KEY') || '';
   const model = props.getProperty('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL;
-  const channelId = props.getProperty('CONFESSION_CHANNEL_ID') || null;
+  const rawChannelId = props.getProperty('CONFESSION_CHANNEL_ID') || '';
+  const channelId = /^-?\d+$/.test(rawChannelId.trim()) ? rawChannelId.trim() : null;
   const adminRaw = props.getProperty('ADMIN_IDS') || '';
   const adminIds = new Set(adminRaw.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s !== ''; }).map(Number));
   return { token: token, geminiKey: geminiKey, model: model, channelId: channelId, adminIds: adminIds, version: BOT_VERSION };
@@ -43,12 +48,41 @@ function getConfig() {
 
 function getAdminIds() { return getConfig().adminIds; }
 function getChannelId() { return getConfig().channelId; }
-function setChannelId(id) { PropertiesService.getScriptProperties().setProperty('CONFESSION_CHANNEL_ID', String(id)); }
+function setChannelId(id) {
+  if (id === null || id === undefined || !/^-?\d+$/.test(String(id).trim())) throw new Error('Invalid channel id: ' + String(id));
+  PropertiesService.getScriptProperties().setProperty('CONFESSION_CHANNEL_ID', String(id).trim());
+}
 function isAdmin(userId) { if (userId === null || userId === undefined) return false; return getAdminIds().has(Number(userId)); }
+
+/* --- WEBHOOK SECRET --- */
+function webhookSecret_() { return PropertiesService.getScriptProperties().getProperty('WEBHOOK_SECRET') || ''; }
+function isWebhookAuthed_(e) {
+  const expected = webhookSecret_();
+  if (!expected) return false;
+  try {
+    if (e.parameter && e.parameter[WEBHOOK_SECRET_PARAM_]) return e.parameter[WEBHOOK_SECRET_PARAM_] === expected;
+  } catch (err) {}
+  try {
+    const headers = (e.headers) ? e.headers : {};
+    for (const key in headers) {
+      if (String(key).toLowerCase() === WEBHOOK_SECRET_HEADER_.toLowerCase()) return String(headers[key]) === expected;
+    }
+  } catch (err) {}
+  return false;
+}
+function deny_(message) {
+  message = message || 'unauthorized';
+  const out = ContentService.createTextOutput(JSON.stringify({ ok: false, error: message }));
+  out.setMimeType(ContentService.MimeType.JSON);
+  return out;
+}
 
 /* --- HTML ESCAPE --- */
 function escapeHtml(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function postCommentHtml_(comment) {
+  return '<b>Comment:</b>\n\n' + escapeHtml(String(comment || ''));
 }
 
 let _logSheetCache_ = null;
@@ -58,13 +92,14 @@ function logUpdate_(update, parsed, action, error) { try { const msg = update.me
 /* --- WEBHOOK & COMMAND REGISTRATION --- */
 function setupWebhook() {
   const cfg = getConfig();
-  const url = WEBHOOK_URL_;
+  const secret = webhookSecret_();
+  const url = secret ? (WEBHOOK_URL_ + '?' + WEBHOOK_SECRET_PARAM_ + '=' + encodeURIComponent(secret)) : WEBHOOK_URL_;
   // Stop polling triggers before switching to webhook to avoid dual delivery
   const triggers = ScriptApp.getProjectTriggers();
   for (let i = 0; i < triggers.length; i++) if (triggers[i].getHandlerFunction() === 'pollTelegram_') ScriptApp.deleteTrigger(triggers[i]);
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/setWebhook?url=' + encodeURIComponent(url) + '&drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'get', muteHttpExceptions: false });
-  console.log('setupWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText() + ' url=' + url);
+  console.log('setupWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText() + ' secretSet=' + !!secret);
   registerCommands();
 }
 
@@ -281,8 +316,8 @@ function cmdConfess(msg, args) {
   const confId = (resp.result && resp.result.message_id) ? resp.result.message_id : null;
   let comment; try { comment = generateComment(text, ''); } catch (e) { console.error('cmdConfess:', e); }
   if (comment && comment.trim().length > 0) {
-    if (confId) sendMessage(ch, '<b>Comment:</b>\n\n' + comment, { replyToMessageId: confId });
-    else sendMessage(ch, '<b>Comment:</b>\n\n' + comment);
+    if (confId) sendMessage(ch, postCommentHtml_(comment), { replyToMessageId: confId });
+    else sendMessage(ch, postCommentHtml_(comment));
   }
   sendMessage(msg.chat.id, 'Posted anonymously. And I had thoughts.');
 }
@@ -301,7 +336,7 @@ function cmdReply(msg, args) {
   const context = hint ? ('Replying to message #' + idStr + '. ' + hint) : ('Replying to message #' + idStr + ' without original text; comment generally.');
   let c; try { c = generateComment(topic, context); } catch (e) { console.error('cmdReply:', e); sendMessage(msg.chat.id, 'Brain short-circuited. Try again.'); return; }
   if (!c || c.trim().length === 0) { sendMessage(msg.chat.id, 'Came up blank. Try a different hint.'); return; }
-  const resp = sendMessage(ch, '<b>Comment on #' + idStr + ':</b>\n\n' + c, { replyToMessageId: Number(idStr) });
+  const resp = sendMessage(ch, '<b>Comment on #' + idStr + ':</b>\n\n' + escapeHtml(String(c || '')), { replyToMessageId: Number(idStr) });
   if (resp && resp.ok) sendMessage(msg.chat.id, 'Comment posted as reply to post #' + idStr + '.');
   else sendMessage(msg.chat.id, 'Could not post reply. Check bot permissions and message id.');
 }
@@ -314,6 +349,7 @@ function cmdSetChannel(msg, args) {
     sendMessage(msg.chat.id, (current ? 'Current channel: <code>' + escapeHtml(current) + '</code>' : 'No channel set. Usage: <code>/setchannel &lt;id&gt;</code>'));
     return;
   }
+  if (!/^-?\d+$/.test(requested)) { sendMessage(msg.chat.id, 'Channel id must be a number. Usage: <code>/setchannel &lt;id&gt;</code>'); return; }
   const test = postToChannel(requested, '<b>Bot connected.</b>');
   if (!test) { sendMessage(msg.chat.id, 'Could not send to channel ' + escapeHtml(requested) + '. Make sure bot is admin with Post Messages.'); return; }
   setChannelId(requested);
@@ -329,6 +365,16 @@ function checkRateLimit(userId, command) {
   const count = raw ? parseInt(raw, 10) : 0;
   if (count >= 5) return true;
   cache.put(key, String(count + 1), 600);
+  return false;
+}
+
+function channelReplyQuotaHit_() {
+  const cache = CacheService.getScriptCache();
+  const key = 'rl_channel_' + Math.floor(Date.now() / 60000);
+  const raw = cache.get(key);
+  const count = raw ? parseInt(raw, 10) : 0;
+  if (count >= CHANNEL_REPLY_MIN_HARD_) return true;
+  try { cache.put(key, String(count + 1), 600); } catch (err2) {}
   return false;
 }
 
@@ -349,7 +395,7 @@ function parseCommand(text) {
 function postCommentToChannel(comment) {
   const ch = getChannelId();
   if (!ch) return false;
-  return postToChannel(ch, '<b>Comment:</b>\n\n' + comment);
+  return postToChannel(ch, postCommentHtml_(comment));
 }
 function postRoastToChannel(roast) { return postCommentToChannel(roast); }
 function postToChannel(channelId, body) {
@@ -362,7 +408,15 @@ function postToChannelWithResult(channelId, body) {
 }
 
 /* --- WEBHOOK ENTRYPOINT --- */
+function doGet(e) {
+  return deny_();
+}
+
 function doPost(e) {
+  if (!isWebhookAuthed_(e)) {
+    console.log('doPost: missing secret (secretSet=' + (webhookSecret_() ? 1 : 0) + ')');
+    return deny_();
+  }
   let update;
   try { update = JSON.parse(e.postData.contents); } catch (err) {
     console.error('doPost: bad JSON', err);
@@ -415,8 +469,12 @@ function handleMessage(msg) {
     if (autoReplyOn && chId && String(msg.chat.id) === String(chId) && msg.text && !(msg.from && msg.from.is_bot === true)) {
       const trimmed = String(msg.text).trim();
       if (trimmed.charAt(0) !== '/') {
-        let c; try { c = generateComment(trimmed, ''); } catch (e) { console.error('listener:', e); }
-        if (c && c.trim().length > 0) sendMessage(chId, '<b>Comment:</b>\n\n' + c, { replyToMessageId: msg.message_id });
+        if (channelReplyQuotaHit_()) {
+          console.log('listener: channel auto-reply muted (quota)');
+        } else {
+          let c; try { c = generateComment(trimmed, ''); } catch (e) { console.error('listener:', e); }
+          if (c && c.trim().length > 0) sendMessage(chId, postCommentHtml_(c), { replyToMessageId: msg.message_id });
+        }
       }
       return;
     }
@@ -508,14 +566,22 @@ function debugDoPostHelp() {
  var freshId = 9000000 + Math.floor(Math.random()*1000000);
  console.log('using freshId='+freshId);
  var update = { update_id: freshId, message: mockPrivateMsg_('/help', {message_id: 100}) };
- var e = { postData: { contents: JSON.stringify(update) } };
+ var e = { postData: { contents: JSON.stringify(update) } };   // no secret → should be unauthorized now
  var res = doPost(e);
  var body = ''; try { body = typeof res.getContent === 'function' ? res.getContent() : (typeof res.getContentText==='function'?res.getContentText(): String(res)); } catch(err){ body='err:'+err; }
- console.log('doPost res body='+body);
- // second call same ID should be duplicate_ignored
- var res2 = doPost(e);
+ console.log('doPost(no secret) body='+body+' (expect Unauthorized/deny)');
+ var eAuth = { postData: { contents: JSON.stringify(update) }, parameter: { secret: 'test-secret' } };  // secret set but property unset → still unauthorized
+ var resAuth = doPost(eAuth);
+ var bodyAuth=''; try{ bodyAuth = typeof resAuth.getContent==='function'?resAuth.getContent(): (typeof resAuth.getContentText==='function'?resAuth.getContentText(): String(resAuth)); }catch(err){bodyAuth='err:'+err;}
+ console.log('doPost(wrong secret) body='+bodyAuth+' (expect Unauthorized/deny unless property is empty)');
+ var e2 = { postData: { contents: JSON.stringify(update) }, parameter: { secret: webhookSecret_() } };  // matches property (may be '' if unset) → normal path
+ var res2 = doPost(e2);
  var body2=''; try{ body2 = typeof res2.getContent==='function'?res2.getContent(): (typeof res2.getContentText==='function'?res2.getContentText(): String(res2)); }catch(err){body2='err:'+err;}
- console.log('doPost dup res body='+body2);
+ console.log('doPost(match secret) body='+body2+' (expect help text / duplicate_ignored)');
+ // second identical e2 → should be duplicate_ignored
+ var res3 = doPost(e2);
+ var body3=''; try{ body3 = typeof res3.getContent==='function'?res3.getContent(): (typeof res3.getContentText==='function'?res3.getContentText(): String(res3)); }catch(err){body3='err:'+err;}
+ console.log('doPost(match secret dup) body='+body3+' (expect duplicate_ignored)');
  console.log('=== direct sendMessage payload test ===');
  var payload = testHelpPayload_();
  console.log('payload logged above');
