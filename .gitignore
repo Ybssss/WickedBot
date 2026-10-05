@@ -2,3 +2,5 @@ node_modules/
 .clasp.json
 *.log
 .workbuddy-ai/
+# Added by code-review-graph
+.code-review-graph/

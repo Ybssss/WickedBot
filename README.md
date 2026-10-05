@@ -65,7 +65,7 @@ isn't a slash command gets "Only commands. Type /help."
    | `GEMINI_API_KEY` | yes | From step 2. Without it every comment falls back to "I had nothing to say for once." |
    | `ADMIN_IDS` | yes | Comma-separated numeric Telegram user ids. Get yours from [@userinfobot](https://t.me/userinfobot). |
    | `CONFESSION_CHANNEL_ID` | no | Numeric like `-1001234567890`, or `@channelname`. Can also be set later via `/setchannel`. |
-   | `AUTO_REPLY` | no | Set to `true` to comment on every new channel post. Anything else (or unset) means off. |
+   | `AUTO_REPLY` | no | Set to `true` (case-insensitive, surrounding spaces ignored) to comment on every new channel post. Anything else, or unset, means off. |
    | `GEMINI_MODEL` | no | Overrides the default model. |
    | `WEBHOOK_SECRET` | no | If set, the webhook URL gains `?secret=` and `doPost` rejects requests without a matching secret or `X-Webhook-Secret` header. |
 
@@ -84,11 +84,43 @@ isn't a slash command gets "Only commands. Type /help."
 
 ## Auto-reply
 
-With `AUTO_REPLY=true`, every non-command post in the configured channel gets a comment
-threaded under it. Posts that come from a bot are ignored, as is anything starting with `/`.
+With `AUTO_REPLY=true`, every non-command text post in the configured channel gets a comment
+threaded under it. Anything starting with `/` is skipped, and posts with no `text` (photos,
+videos — which carry `caption` instead) are skipped and logged as `channel_media_skipped`.
+
+`AUTO_REPLY` is read through one helper and compared after trimming and lowercasing, so
+`true`, `TRUE` and ` true ` all enable it. Anything else means off.
 
 Note that channel posts normally carry `sender_chat` rather than `from`, so any code touching
-a channel post must not assume `from` exists.
+a channel post must not assume `from` exists. **In particular, `sender_chat` is the *channel*
+for every channel post — including the bot's own** — so there is no field that distinguishes
+the bot's comments from a user's. Telegram echoes a channel's posts back through `getUpdates`,
+so without a guard the bot answers its own comment and loops. The bot therefore records the
+`message_id` returned by `sendMessage` and skips those; they are logged as `own_post_ignored`.
+
+## Diagnosing silence
+
+If the bot stops replying, run **`diagnose`** from the editor dropdown (Run → `diagnose`) and
+read View → Logs. It only reads — it sends no message and writes no property — and it checks,
+in order: the token (via `getMe`), whether a **webhook is still armed** (this makes `getUpdates`
+return 409, so polling receives nothing), whether the `pollTelegram_` trigger exists, the channel
+id, `AUTO_REPLY`, channel reachability, whether the bot is an admin in the channel, and the last
+rows of the log sheet. The final line names the first thing to fix.
+
+The most common causes, in order:
+
+1. **`AUTO_REPLY` is not `true`** — channel posts are then ignored *by design*.
+2. **A webhook is still registered** — `getUpdates` returns 409 and nothing is ever received.
+3. **The `pollTelegram_` trigger is missing** — run `setupPolling`.
+4. **The bot is not an admin in the channel** — every post fails with 403.
+5. **The deployed file is stale** — re-paste `Code.gs` (see below).
+
+## Tests
+
+`node tests/run.js` runs the real `Code.gs` against stubs for the Apps Script services and
+reports a pass/fail total. It catches reference errors, wrong argument shapes and logic faults
+without a deployment. It does **not** talk to Telegram or Google Sheets, so a green run means
+the logic is right, not that the bot replied.
 
 ## Model
 
@@ -108,6 +140,9 @@ string rather than failing the command.
 - **Mock harness** — `testParse`, `testCmdHelp`, `testHandleHelp`, `testHelpPayload_`,
   `debugDoPostHelp` and `debugAll_` run from the editor without any Telegram traffic. Check
   View → Logs or Executions afterwards.
+- **`diagnose`** — run from the editor dropdown for a read-only report on why the bot is silent.
+  See "Diagnosing silence" above.
+- **Regression suite** — `node tests/run.js` (see "Tests" above).
 - `stopPolling` removes the trigger and deliberately does not re-arm the webhook.
 
 ## Privacy and security

@@ -6,16 +6,24 @@
 > planned, what was tried and rejected, and which claims in the code and in older documents are already
 > known to be wrong. Read it, then verify the specific claim you are about to rely on, in source.
 >
-> **Latest state (2026-09-18):** All ten findings from the 2026-09-15 review are closed and committed as
-> `f4a2068`, which is pushed (HEAD is `ee7628f`, 0 commits ahead of `origin/master`). The bot is verified
-> working in **polling mode** as of 2026-09-06; nothing since has been run live — `f4a2068` is verified by
-> syntax check and reading only. Remaining work is deployment and live verification (in the owner's GAS
-> editor, not here). Most urgent: **rotate the Telegram bot token now** — two raw tokens sit in the pushed
-> git history on GitHub (see section 5), and the Gemini API key was exposed in chat on 2026-09-02 and
-> should be rotated too. Start with section 4 (progress), section 5 (drift), then section 6
-> (verification baseline). Docs note (2026-09-18): the legacy "orchestrator / worker role-play"
-> framing was stripped from this file (preamble + worker-persona labels; technical facts, hashes and
-> timestamps kept). That doc cleanup is uncommitted until you commit it.
+> **Latest state (2026-10-05 17:32Z):** Both blockers are **cleared in the live editor** and
+> `diagnose()` now reports **"No blocking problem found"** — no webhook, exactly one `pollTelegram_`
+> trigger, `POLL_OFFSET` reset to `0`, channel reachable, bot is a channel admin. See **Item 17**.
+> The root cause was a **webhook still armed** (409 blocks `getUpdates`) **plus zero polling
+> triggers** — and `setupWebhook()` silently deletes the poll trigger, while the file's own header
+> told you to deploy a web app and never to run `setupPolling`. A second latent trap was fixed at the
+> same time: `setupPolling` used to preserve a stale `POLL_OFFSET` (`29357183`), and since Telegram
+> assigns a *random* `update_id` after a week of quiet, that alone would have kept the bot silent with
+> **no error logged**. The deployed file is **provably the new revision**: only the new code rewinds
+> the offset, and it is now `0`. `node tests/run.js` → **119 assertions, 0 failed**.
+> **Live E2E is still unproven** — the log sheet still shows `rows=4`, newest `2026-09-18T02:44:24Z`,
+> so no update has yet been processed through polling. DM the bot `/start` and allow ~60 s; confirm by
+> the log sheet growing past 4 rows or by `pollTelegram_` appearing in Executions. Still outstanding:
+> **rotate the Telegram bot token** (two raw tokens sit in the pushed git history, section 5) and the
+> Gemini key exposed in chat 2026-09-02. Start with section 4 (progress), section 5 (drift), then
+> section 6 (verification baseline). Docs note (2026-09-18): the legacy "orchestrator / worker
+> role-play" framing was stripped from this file (preamble + worker-persona labels; technical facts,
+> hashes and timestamps kept).
 
 ---
 
@@ -106,8 +114,14 @@ Mark items the owner delegated to the agent as _(delegated)_.
 | `LOG_SHEET_ID` | Spreadsheet `174KDDCMnU5CwAOr0bxuzQHD-L5wrV2C14dObwgFIPWc`; logging off the hot path (D7). |
 | mock harness | Editor-only mocks (`mockPrivateMsg_`, `testParse`, `testCmdHelp`, `testHandleHelp`, `testHelpPayload_`, `debugDoPostHelp`, `debugAll_`) for webhook-free debugging in View → Logs. |
 | GAS 302 echo | `ContentService` always redirects to `script.googleusercontent.com`; Telegram reads it as non-2XY and serial-retries. Root cause of the 2026-09-03 webhook saga. |
-| CodeGraph | Local code index: `codegraph.json` (maps `.gs` → javascript) + `.codegraph/codegraph.db`. Use `codegraph sync` after edits. |
-| `sender_chat`-not-`from` | Telegram quirk relevant to channel posts — see README. |
+| CodeGraph | **Superseded 2026-09-26** by `code-review-graph`. The old index (`codegraph.json` + `.codegraph/`) was deleted; the replacement is `.code-review-graph/graph.db`, refreshed with `code_review_graph update` and queried with `query callers_of <fn>`. Note rule 5 still names the old tool — see section 5. |
+| `diagnose()` | Read-only editor function: checks token, armed webhook, trigger count, channel id, `AUTO_REPLY`, channel reachability, bot admin status, log sheet. Run it first when the bot is silent. |
+| regression suite | `tests/run.js` — runs the real `Code.gs` text against Apps Script stubs. Catches logic faults without a deployment; does not prove delivery. |
+| `sender_chat`-not-`from` | Telegram quirk relevant to channel posts — see README. **Consequence (2026-10-05):** because *every* `channel_post` carries `sender_chat` = the channel and no `from`, the bot's own posts are indistinguishable from a user's by any field. The `message_id` from `sendMessage` is the only reliable signal. |
+| `rememberBotMessage_` / `isOwnChannelMessage_` | CacheService (6 h) record of channel message ids the bot posted, so the listener never answers its own comment. Keyed by chat id + message id. |
+| `autoReplyEnabled_` | The single reader of `AUTO_REPLY` (trim + lowercase, so `'TRUE'`/`' true '` mean on). Used by the listener *and* `cmdHelp` so they cannot disagree. |
+| `diagnose()` | Editor-only, read-only. Checks token, armed webhook, trigger count, channel id, `AUTO_REPLY`, channel reachability, bot admin status and the log sheet; prints the first thing to fix. Sends nothing. |
+| `own_post_ignored` / `channel_media_skipped` | Log-sheet actions for the two channel cases that used to be invisible: the bot's own echoed post, and a media/caption post (`msg.text` absent). |
 
 ---
 
@@ -349,6 +363,151 @@ recorded as "deliberately not pushed" on 2026-09-15 but is now pushed — see se
  5. `git push` once verified (currently HEAD `ee7628f`, 0 ahead — nothing to push unless more changes land).
 **Supersedes.** none.
 
+### ✅ Item 16: Bot silent in the confession channel — self-reply loop + silent-failure audit (2026-10-05)
+
+**What / why.** Owner report: "the bot is not functioning at all, it never replies to any chat in
+confession." Nothing had run live since 2026-09-06, so this was diagnosed by executing the real
+`Code.gs` against a stubbed Apps Script environment rather than by reading it. The harness was
+adapted from the `limit tester` project (`tests/lib/gas-env.js` there), which runs the whole `.gs`
+file against stubs and counts calls; WickedBot now has the equivalent under `tests/`.
+**Changed.** New `tests/` suite (`run.js`, `lib/gas-env.js`, `test-channel.js`, `test-silence.js`,
+`test-commands.js`, `test-diagnose.js`, `test-loop.js`). `Code.gs` fixes:
+ 1. **Self-reply loop (defect).** Telegram echoes a channel's posts back through `getUpdates`,
+    *including posts the bot itself made*, and reports **every** `channel_post` with `sender_chat`
+    set to the **channel** and no `from` at all — so the old guard
+    `!(msg.from && msg.from.is_bot === true)` never fired and the bot answered its own comments.
+    Fixed with `rememberBotMessage_`/`isOwnChannelMessage_` (ScriptCache, keyed by chat + the
+    `message_id` that `sendMessage` returned), recorded from every channel-posting path
+    (`/confess` x2, `/comment`, `/reply`, the listener). Skips are logged `own_post_ignored`.
+ 2. **`AUTO_REPLY` read strictly as `=== 'true'`.** `'True'`, `'TRUE'`, `' true '` all silently
+    meant **off**, and `cmdHelp` read the flag separately from the listener, so the two could
+    disagree. Both now go through `autoReplyEnabled_()` (trim + lowercase), and `/help` warns when
+    auto-reply is on but no channel is set.
+ 3. **Media posts logged as `channel_ignored`.** A photo/video post carries `caption`, not `text`,
+    so it was silently dropped under a misleading label; now `channel_media_skipped`.
+ 4. **New `diagnose()`** (editor-only, read-only): checks the token via `getMe`, a still-armed
+    webhook (`getWebhookInfo` — the 409 that kills polling), the `pollTelegram_` trigger count, the
+    numeric channel id, `AUTO_REPLY`, channel reachability, bot admin status via `getChatMember`,
+    and the last rows of the log sheet; then prints the single first thing to fix.
+**Decision(s).** D8 (single listener) reaffirmed — the own-message guard lives in that one place.
+**Verified.** `node tests/run.js` → **114 assertions passed, 0 failed, across 5 files** (channel 25,
+commands 29, diagnose 24, loop 6, silence 30). `node --check` on a `.js` temp copy: clean.
+CodeGraph `update`: 1 file, 55 nodes, 601 edges. Every test runs the real `Code.gs` text.
+**Not done / open.** Not run live — GAS still needs the re-paste and `diagnose()` run in the
+owner's editor. The suite proves logic, not delivery: it cannot see the deployed copy, the real
+token, or Telegram. Two failure modes remain by design and are documented, not fixed: a poisoned
+`POLL_OFFSET` never rewinds, and a de-admined bot fails 403 with no alert.
+**Supersedes.** Item 15's assumption that the code side was finished; section 6's "verified
+2026-09-06" line now carries a "regression suite" row.
+
+### ✅ Item 17: Root cause CONFIRMED from the live editor — webhook re-armed, no polling trigger (2026-10-05)
+
+**What / why.** Owner ran `diagnose()` in the GAS editor (17:25:05Z). This is the first live evidence
+since 2026-09-06 and it **replaces inference with fact** for the "bot is silent" report.
+**Evidence (verbatim from the execution log).**
+```
+[OK]      TELEGRAM_BOT_TOKEN is set — length 46, ends ...bwFY
+[OK]      Telegram accepts the token — @WickedAICofessionbot
+[PROBLEM] A webhook is still registered — url=https://script.google.com/macros/s/AKfycbyYL3Wg.../exec
+[INFO]    pending updates waiting — 3
+[PROBLEM] No pollTelegram_ trigger exists — nothing calls the bot — this alone explains total silence
+[INFO]    all project triggers — (none)
+[OK]      POLL_OFFSET is set — 29357183
+[OK]      Channel is reachable — UTHMConfession (channel)
+[OK]      Bot is an admin in the channel — status=administrator
+[OK]      Log sheet reachable — rows=4   (newest 2026-09-18T02:44:24Z, action=dispatch_help)
+```
+**Root cause.** Two independent blockers, either of which alone silences the bot:
+ 1. **A webhook is armed** at the hardcoded `WEBHOOK_URL_` (`AKfycbyYL3Wg.../exec`) — the dead path
+    from D5. Telegram refuses `getUpdates` while a webhook is set (409), so polling could receive
+    nothing even if it ran. `setupWebhook()` deletes the poll trigger (line 125), so running it also
+    removes the trigger — which is exactly the observed state: webhook armed **and** zero triggers.
+ 2. **No `pollTelegram_` trigger exists.** Nothing calls the bot at all.
+**Why it went unnoticed for a month.** `setupWebhook()` silently deletes the polling trigger and
+arms the webhook, and the file header's own setup steps said *"Deploy → New deployment → Web app →
+Anyone"* — instructions for the **dead webhook path** that never mentioned `setupPolling`. Following
+the file's own instructions produced exactly this silent state. Last real activity in the log sheet is
+2026-09-18, consistent with the webhook era ending there.
+**Changed (Code.gs, uncommitted).**
+ 1. **`setupPolling()` now resets `POLL_OFFSET` to `0` unconditionally** (was: only if unset). This is
+    a **second latent trap** found from the live data: the stored offset was `29357183` — a September
+    value from the webhook era — and Telegram assigns a **random** `update_id` after a week of no
+    updates. Since `getUpdates` returns only `update_id >= offset`, the old code would have left the
+    bot polling forever, receiving an empty list, logging **no error**: total silence that looks
+    identical to a dead trigger. `deleteWebhook()` runs first and drops the pending queue, so
+    rewinding cannot replay old updates.
+ 2. `deleteWebhook()` now parses the response and **returns/report success honestly** (it previously
+    logged and ignored the result, on which `setupPolling`'s rewind depends).
+ 3. `pollTelegram_` now **spells out 409 and 401** instead of printing a bare status code — 409 is
+    the single likeliest cause of total silence and the status code alone does not say so.
+ 4. **File header setup steps rewritten**: they now say to make the bot a channel admin and to run
+    `setupPolling`, and carry an explicit "do not deploy a web app or run `setupWebhook`" warning.
+**Decision(s).** D5 reaffirmed (polling is the only live ingress). D8 unaffected.
+**Verified.** `node --check` clean; `node tests/run.js` → **119 assertions passed, 0 failed** (5
+files; channel 30, commands 29, diagnose 24, loop 6, silence 30), including two new tests that fail
+against the old `setupPolling` (stale offset → silence; reset → delivery restored). CodeGraph
+`update`: 55 nodes, 607 edges. `diagnose()` correctly identified both blockers from live state.
+**Fix applied by the owner in the editor (2026-10-05 17:32:24Z) — first clean `diagnose`.**
+```
+[OK] No webhook registered — polling can receive updates
+[OK] Exactly one pollTelegram_ trigger — the bot is being called once a minute
+[INFO] all project triggers — pollTelegram_
+[OK] POLL_OFFSET is set — 0
+[OK] Channel is reachable — UTHMConfession (channel)
+[OK] Bot is an admin in the channel — status=administrator
+==> No blocking problem found.
+```
+Both blockers cleared and the offset is `0`. The `pending updates waiting — 3` line is gone, i.e.
+`drop_pending_updates` discarded the stale September queue as intended.
+**The deployed file is provably the new revision.** The offset was `29357183` and is now `0`; the
+**old** `setupPolling` reset the offset only when unset, so it would have left `29357183` in place.
+Only the new code rewinds it — so the re-paste took, confirmed by behaviour rather than by assumption.
+**Not done / open.** **Live E2E still unproven**: the log sheet still shows `rows=4` with the newest
+entry `2026-09-18T02:44:24Z`, so no update has been processed through polling yet. Owner must DM the
+bot `/start` and allow up to ~60 s (the poll interval). Confirm by either the log sheet growing past
+4 rows, or Executions showing `pollTelegram_` runs. The 3 pending updates were queued before
+`deleteWebhook` dropped them.
+**Supersedes.** Item 16's inference — the self-reply loop it fixed was real, but it was **not** the
+cause of this silence; Item 16's own evidence showed the loop never starved genuine posts. Section 6's
+"verified 2026-09-06" line is now known to have covered a webhook-era state.
+
+### ✅ Item 18: Secret exposure closed — rotation VERIFIED, history already purged (2026-10-05)
+
+**What / why.** Owner instruction: "rotate the secret in git history, make sure no secret within and
+commit and push". Rotation and purging are different jobs (D10) and were checked separately.
+**Verified — rotation (the part that actually matters).** Both token-shaped strings from the old
+public revisions were extracted and tested against `getMe`. **Both returned HTTP 401 Unauthorized**,
+i.e. both credentials are **revoked and dead**:
+```
+bot id 8972406236 -> HTTP 401 (revoked)
+bot id 8945572488 -> HTTP 401 (revoked)
+```
+No Gemini-key-shaped string (`AIza…`) appears in any revision — that key was pasted into chat, never
+committed, and is unaffected by this work. The exposed values were never printed or re-recorded here
+(rule 10).
+**Discovered — the history purge had ALREADY been done.** `.git/filter-repo/` contains `commit-map`,
+`ref-map` and `changed-refs` from a completed `git filter-repo` run: 26 commits rewritten, all
+`refs/heads/master`. The rewritten tip `ac2c036` **is** what GitHub serves. So:
+ - **Local history is clean.** A full scan of all 53 blobs in the object store for
+   `[0-9]{8,12}:[A-Za-z0-9_-]{30,}` and `AIza[0-9A-Za-z_-]{30,}` returned **0 hits**; the working tree
+   (32 files, incl. untracked) also returned **0 hits**.
+ - **The old commits remain retrievable from GitHub by SHA** (they are dangling, not GC'd). Confirmed
+   by fetching `PROGRESS.md` at `09ff5a8`, `64cefc7`, `7bfaffc`, `543618d`, `b6ba428`, `395f6c4`,
+   `72876b4` — all still served. This is now **harmless**: the credentials in them are revoked. It
+   stays true until GitHub garbage-collects, and a force-push does not accelerate that.
+ - **No forks, 0 stars, 0 watchers** — no third-party copy of the pre-rewrite history is known.
+**Consequence for this file.** The commit hashes quoted throughout sections 4 and 5 are
+**pre-rewrite** and no longer resolve locally (e.g. `f4a2068` → `960fbd5`, `ee7628f` → `f363c9a`,
+`09ff5a8` → `da3eea0`, `395f6c4` → `320f6ec`). They are kept as historical record; the full
+old→new map is `.git/filter-repo/commit-map`. Do not `git rm` under `.git/filter-repo/`.
+**Decision(s).** D10 — confirmed correct and now satisfied: revocation was the fix, redaction/purging
+was hygiene. The exposure window was 2026-09-02/03 → 2026-10-05.
+**Not done / open.** Removing the dangling pre-rewrite commits from GitHub entirely needs either a
+GitHub Support request or deleting and recreating the repo — owner's call, and **not urgent now that
+the tokens are dead**. Also noted: `.codebuddy/`, `.gemini/`, `.kiro/`, `.qoder/` were deleted from
+disk during this session (outside it) — they were untracked, so no git impact.
+**Supersedes.** Section 5's "open security issue" row for the leaked tokens.
+
 ---
 
 ## 5. Known drift and superseded claims
@@ -362,20 +521,36 @@ remembered from a superseded source is unverified until re-checked.
 | Old webhook-path docs/entries (≈`AKfycbw1.../dev`) | Webhook is the live ingress; just point it at the right URL | GAS 302 echo makes webhook unusable | **superseded 2026-09-06** by polling (D5) |
 | README before 2026-09-15 rewrite | 4-file layout, `/roast`-era command set, tells you to run `setupWebhook` | Single file, polling, real command set | **superseded 2026-09-15** (Item 14) |
 | Early docs | `gemini-3.1-flash-lite` is a real model | Typo; default is `gemini-2.5-flash-lite` (D3) | **superseded** — D3 |
-| PROGRESS.md on 2026-09-02/03 | Raw Telegram bot tokens could be recorded in this file | Two raw tokens entered the **pushed** git history; redaction does not rewrite history | **open security issue** — revoke token via BotFather, rotate (D10) |
+| PROGRESS.md on 2026-09-02/03 | Raw Telegram bot tokens could be recorded in this file | Two raw tokens entered the **pushed** git history; redaction does not rewrite history | **CLOSED 2026-10-05** — both tokens verified revoked (HTTP 401 against `getMe`); history was already purged by `git filter-repo`; local object store scans clean. See Item 18. |
+| Sections 4–5 commit hashes (quoted throughout) | The hashes name the current commits | A `git filter-repo` rewrite (recorded in `.git/filter-repo/commit-map`) changed every hash; the quoted ones are **pre-rewrite** and no longer resolve locally (`f4a2068` → `960fbd5`, `ee7628f` → `f363c9a`, `09ff5a8` → `da3eea0`, `395f6c4` → `320f6ec`) | **known, kept deliberately** as historical record — use the commit-map to resolve |
+| Old commits still retrievable on GitHub by SHA | "The history is purged" | Dangling pre-rewrite commits (`09ff5a8`, `64cefc7`, `7bfaffc`, `543618d`, `b6ba428`, `395f6c4`, `72876b4`) are **still served** by GitHub until it GCs them; a force-push does not remove them | **harmless but open** — the credentials inside are revoked; full removal needs GitHub Support or repo recreation (Item 18) |
 | 2026-09-15 items | "all ten findings closed" while deployed editor copy was still stale | Repo is fixed; the **deployed** `Code.gs` may still be a truncated/stale paste | **drift** — re-paste verified against HEAD before debugging live bugs |
+| Item 10 / section 6 (2026-09-06) | Channel auto-reply worked | It replied to **its own comments**: Telegram echoes a channel's posts back through `getUpdates`, and every `channel_post` carries `sender_chat` = the channel with no `from`, so the old `is_bot` guard never matched | **superseded 2026-10-05** by Item 16 — fixed with own-message tracking |
+| README / PROGRESS before 2026-10-05 | `AUTO_REPLY` must be exactly `true` | Correct, but `'True'`/`'TRUE'`/`' true '` silently meant **off**, with no warning anywhere | **superseded 2026-10-05** — `autoReplyEnabled_()` now trims and lowercases |
+| Rule 5 + glossary (before 2026-10-05) | "Initialise CodeGraph … use it before grep" | `codegraph.json` and `.codegraph/` were **deleted** on 2026-09-26 and replaced by `code-review-graph` (`.code-review-graph/graph.db`). Rule 5 names a tool that no longer exists here | **drift** — rule 5 needs rewording by the owner (it is an owner instruction, not a finding) |
+| `AGENTS.md` / `CLAUDE.md` etc. (2026-09-26) | "Start with the code-review-graph MCP tools" | Those MCP tools are **not available in this harness**: `code-review-graph install` supports 17 platforms and **DSH is not one of them**, and the DSH profile has no `@deepseek-ai/dsh-mcp-client` entry, so the server is never launched. The `.mcp.json` / `AGENTS.md` files it wrote are Claude/Cursor-shaped and DSH does not read them | **drift** — the graph is still usable via the `code_review_graph` CLI; wiring the MCP server into `cordis.patch.yml` is an owner decision |
+| `.claude/settings.json`, `.gemini/hooks/*.sh` (2026-09-26) | "The graph auto-updates on file changes (via hooks)" | **Partly true, and the distinction matters.** The **git** `pre-commit` hook *does* work: Git for Windows runs hooks under its own bundled `sh.exe` (`C:\Program Files\Git\usr\bin\sh.exe`), which can see `code-review-graph`, so the graph refreshes on every commit — observed working 2026-10-05 (`Incremental: 7 files updated, 82 nodes, 772 edges` during commit `1c8f64c`). The **AI-tool** hooks are the broken ones: `.claude/settings.json` and `.gemini/hooks/*.sh` are POSIX shell that call `cat >/dev/null`, `command -v` and `python3`, and on this host PATH `bash` is the WSL relay with no distro (`execvpe(/bin/bash) failed`) and `python3` is absent — so those never fire | **drift** — graph freshness is guaranteed at commit time, not on edit; run `code_review_graph update` by hand for mid-session queries |
 | `setupWebhook` still present in `Code.gs` | The code may look like webhook is live | Reference only; ingress is polling; `stopPolling()` no longer re-arms it | **known dead path** — do not re-enable without re-opening D5 |
 
 ## 6. Verification baseline
 
 | Check | Command | Last result | Date |
 | ----- | ------- | ----------- | ---- |
-| Syntax check | copy `Code.gs` → `.js`, `node --check` | clean | 2026-09-15 |
-| CodeGraph index | `codegraph sync` | 52 nodes (1 file) | 2026-09-15 |
-| Secret scan | `git grep -E "AIza[0-9A-Za-z_-]{20,}|[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}"` | 2 hits before redaction → 0 after | 2026-09-15 |
-| Git state | `git status` / `git log --oneline -5` | clean, HEAD `ee7628f`, 0 ahead of origin/master | 2026-09-18 |
-| Live polling E2E | DM `/start`, `/help`, `/comment`, `/confess`; channel post → threaded reply | ✅ verified 2026-09-06; **not re-verified since** | 2026-09-06 |
-| Live webhook deploy | — | N/A — webhook path abandoned (D5) | — |
+| Syntax check | copy `Code.gs` → `.js`, `node --check` | clean | 2026-10-05 |
+| Regression suite | `node tests/run.js` | **119 passed, 0 failed** (5 files) | 2026-10-05 |
+| CodeGraph index | `code_review_graph update` | 55 nodes, 607 edges (1 file) | 2026-10-05 |
+| Live diagnosis | `diagnose()` in the GAS editor | ✅ 2026-10-05 17:25Z found both blockers; **17:32Z clean — "No blocking problem found"** | 2026-10-05 |
+| Live polling E2E | DM `/start`, `/help`, `/comment`, `/confess`; channel post → threaded reply | ⏳ **unproven** — log sheet still `rows=4`, newest 2026-09-18T02:44:24Z | — |
+| Live webhook deploy | — | N/A — webhook path abandoned (D5); a stray armed webhook is what broke it | — |
+| Secret scan | `git grep -E "AIza[0-9A-Za-z_-]{20,}|[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}"` | 0 hits | 2026-09-15 |
+| Git state | `git status` / `git log --oneline -5` | HEAD `ac2c036`, 0 ahead of origin/master | 2026-10-05 |
+
+The regression suite executes the **real text of `Code.gs`** against stubs for PropertiesService,
+CacheService, UrlFetchApp, SpreadsheetApp, ScriptContent, ContentService and ScriptApp. It catches
+reference errors, wrong argument shapes, and logic faults — including the self-reply loop, which no
+amount of reading had found. It does **not** prove delivery: it cannot see the deployed editor copy,
+the real token, or Telegram's actual behaviour. Green here means "the logic is right", not "the bot
+replied".
 
 ---
 

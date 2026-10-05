@@ -9,10 +9,17 @@
    3. Paste this entire file (from line 1 to end) into that file.
    4. Set Script Properties (gear icon):
       TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, ADMIN_IDS, AUTO_REPLY, CONFESSION_CHANNEL_ID
-      WEBHOOK_SECRET (optional; if set, webhook URL gains ?secret= and doPost rejects requests without it)
-   5. Deploy -> New deployment -> Web app -> Anyone -> Deploy. Copy URL.
-   6. Open editor dropdown -> select 'registerCommands': Run (one-time).
-   7. DM bot /start -> should respond. /help -> command list.
+      WEBHOOK_SECRET (optional; unused unless you deliberately re-arm the webhook)
+   5. Make the bot an ADMIN of the channel, with Post Messages.
+   6. Open the editor dropdown -> select 'setupPolling': Run (one-time). This deletes any
+      webhook and installs the 1-minute poll trigger. THEN run 'registerCommands' once.
+   7. DM bot /start -> should respond within ~60s. /help -> command list.
+   8. If it is silent, run 'diagnose' and read View -> Logs. It names the first thing to fix.
+
+   DO NOT deploy a web app or run 'setupWebhook'. Apps Script's ContentService always answers
+   a webhook with a 302, Telegram counts that as failed delivery and retries forever, so only
+   the first update ever gets through. Polling is the live ingress. An armed webhook also makes
+   getUpdates fail with 409, which silences the bot completely — run 'setupPolling' to clear it.
 
    WARNING: the user pasted their real Gemini API key in this chat. The key is
    now in the conversation transcript. It is NEVER embedded in source code
@@ -32,6 +39,12 @@ const WEBHOOK_URL_ = 'https://script.google.com/macros/s/AKfycbyYL3WgUNBGRNwN06E
 const WEBHOOK_SECRET_HEADER_ = 'X-Webhook-Secret';
 const WEBHOOK_SECRET_PARAM_ = 'secret';
 const CHANNEL_REPLY_MIN_HARD_ = 15;
+// Bot-posted channel message ids, so the bot never answers its own comment.
+// Telegram reports EVERY channel post with `sender_chat` = the channel itself and no
+// `from` at all, so the bot's own post is indistinguishable from a user's by any field.
+// The message_id returned by sendMessage is the only reliable signal.
+const BOT_MSG_KEY_PREFIX_ = 'botmsg_';
+const BOT_MSG_TTL_SECONDS_ = 21600; // CacheService maximum (6 hours)
 
 function getConfig() {
   const props = PropertiesService.getScriptProperties();
@@ -85,6 +98,26 @@ function postCommentHtml_(comment) {
   return '<b>Comment:</b>\n\n' + escapeHtml(String(comment || ''));
 }
 
+/* --- OWN-MESSAGE TRACKING --- */
+function rememberBotMessage_(chatId, messageId) {
+  if (messageId === undefined || messageId === null) return;
+  try { CacheService.getScriptCache().put(BOT_MSG_KEY_PREFIX_ + String(chatId) + '_' + String(messageId), '1', BOT_MSG_TTL_SECONDS_); } catch (e) {}
+}
+function isOwnChannelMessage_(chatId, messageId) {
+  if (messageId === undefined || messageId === null) return false;
+  try { return CacheService.getScriptCache().get(BOT_MSG_KEY_PREFIX_ + String(chatId) + '_' + String(messageId)) === '1'; } catch (e) { return false; }
+}
+
+/* --- AUTO_REPLY FLAG --- */
+// Read in one place so /help and the listener can never disagree, and so the
+// comparison tolerates 'True' / 'TRUE' / ' true ' instead of silently meaning "off".
+function autoReplyEnabled_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY');
+    return String(raw === null || raw === undefined ? '' : raw).trim().toLowerCase() === 'true';
+  } catch (e) { return false; }
+}
+
 let _logSheetCache_ = null;
 function logToSheet_(row) { try { if (!_logSheetCache_) { const ss = SpreadsheetApp.openById(LOG_SHEET_ID); let sh = ss.getSheetByName(LOG_SHEET_NAME); if (!sh) { sh = ss.insertSheet(LOG_SHEET_NAME); sh.appendRow(['timestamp','update_id','chat_id','chat_type','user_id','username','text','parsed_command','action','error','webhook_url']); } _logSheetCache_ = sh; } _logSheetCache_.appendRow(row); } catch (e) { _logSheetCache_ = null; console.error('logToSheet_:', e); } }
 function logUpdate_(update, parsed, action, error) { try { const msg = update.message || update.channel_post || update.edited_message || {}; const chat = msg.chat || {}; const from = msg.from || {}; const text = msg.text || JSON.stringify(update).substring(0,500); const row = [ new Date().toISOString(), update.update_id || '', chat.id || '', chat.type || (update.channel_post ? 'channel' : ''), from.id || '', from.username || '', String(text).substring(0,500), parsed ? parsed.command : '', action || '', error ? String(error).substring(0,500) : '', '' ]; logToSheet_(row); } catch(e){} }
@@ -107,7 +140,14 @@ function deleteWebhook() {
   const cfg = getConfig();
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/deleteWebhook?drop_pending_updates=true';
   const resp = UrlFetchApp.fetch(apiUrl, { method: 'post', muteHttpExceptions: true });
-  console.log('deleteWebhook: code=' + resp.getResponseCode() + ' body=' + resp.getContentText());
+  const body = resp.getContentText();
+  console.log('deleteWebhook: code=' + resp.getResponseCode() + ' body=' + body);
+  // Report success honestly: setupPolling rewinds the offset on the strength of this call,
+  // and a silent failure here is what turns a stale queue into a replay.
+  let ok = false;
+  try { ok = JSON.parse(body).ok === true; } catch (e) { ok = false; }
+  if (!ok) console.error('deleteWebhook: FAILED (code ' + resp.getResponseCode() + ') — the webhook may still be armed, which blocks getUpdates with 409');
+  return ok;
 }
 
 function pollTelegram_() {
@@ -119,7 +159,19 @@ function pollTelegram_() {
   const apiUrl = TELEGRAM_API_BASE_ + '/bot' + cfg.token + '/getUpdates?timeout=5&limit=20&offset=' + offset;
   let resp;
   try { resp = UrlFetchApp.fetch(apiUrl, { method: 'get', muteHttpExceptions: true }); } catch(e){ console.error('pollTelegram_: fetch failed', e); return; }
-  if (resp.getResponseCode() < 200 || resp.getResponseCode() >=300) { console.error('pollTelegram_: http '+resp.getResponseCode()+' '+resp.getContentText()); return; }
+  if (resp.getResponseCode() < 200 || resp.getResponseCode() >=300) {
+    // 409 means a webhook is still armed, and Telegram refuses getUpdates while one is set.
+    // It is the single most likely cause of total silence, and the bare status code does not
+    // say so — spell it out, because this log line is the only trace the owner will find.
+    if (resp.getResponseCode() === 409) {
+      console.error('pollTelegram_: 409 CONFLICT — a webhook is still registered, so Telegram refuses getUpdates and the bot receives NOTHING. Run setupPolling() (it calls deleteWebhook first), or diagnose() to confirm.');
+    } else if (resp.getResponseCode() === 401) {
+      console.error('pollTelegram_: 401 UNAUTHORIZED — TELEGRAM_BOT_TOKEN is wrong or was revoked in BotFather. Copy the current token into Script Properties.');
+    } else {
+      console.error('pollTelegram_: http '+resp.getResponseCode()+' '+resp.getContentText());
+    }
+    return;
+  }
   let data; try { data = JSON.parse(resp.getContentText()); } catch(e){ console.error('pollTelegram_: parse', e); return; }
   if (!data.ok || !data.result || data.result.length===0) return;
   let maxId = offset;
@@ -145,15 +197,19 @@ function pollTelegram_() {
 }
 
 function setupPolling() {
-  deleteWebhook();
+  deleteWebhook(); // also drops the pending queue, so rewinding the offset cannot replay anything
   const props = PropertiesService.getScriptProperties();
-  let existing = props.getProperty('POLL_OFFSET');
-  // Only reset if missing; don't rewind and replay the entire queue.
-  if (!existing) props.setProperty('POLL_OFFSET', '0');
+  // Reset the offset UNCONDITIONALLY. It must not be preserved: Telegram assigns a RANDOM
+  // update_id after a week with no updates, so a stored offset can end up ABOVE every future
+  // update — and getUpdates only ever returns updates with update_id >= offset. The bot then
+  // polls forever, gets an empty list, and logs no error at all: total silence that looks
+  // exactly like a dead trigger. deleteWebhook() above already dropped the pending queue, so
+  // starting from 0 cannot replay old updates.
+  props.setProperty('POLL_OFFSET', '0');
   const triggers = ScriptApp.getProjectTriggers();
   for (let i=0;i<triggers.length;i++) if (triggers[i].getHandlerFunction()==='pollTelegram_') ScriptApp.deleteTrigger(triggers[i]);
   ScriptApp.newTrigger('pollTelegram_').timeBased().everyMinutes(1).create();
-  console.log('setupPolling: created 1m trigger, webhook deleted, offset 0');
+  console.log('setupPolling: created 1m trigger, webhook deleted, offset reset to 0');
 }
 
 function stopPolling() {
@@ -285,8 +341,10 @@ function cmdHelp(msg) {
   const lines = ['<b>Available commands</b>\n'];
   for (let i = 0; i < COMMANDS.length; i++) { lines.push('/' + COMMANDS[i].name + ' — ' + escapeHtml(COMMANDS[i].description)); }
   lines.push('\nAdmins can also use /setchannel to configure the channel.');
-  const on = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
-  if (on) lines.push('\nAuto-reply is <b>on</b> — the bot comments on every new channel post.');
+  const on = autoReplyEnabled_();
+  const ch = getChannelId();
+  if (on && !ch) lines.push('\nAuto-reply is <b>on</b> but no channel is set — /setchannel &lt;id&gt;.');
+  else if (on) lines.push('\nAuto-reply is <b>on</b> — the bot comments on every new channel post.');
   sendMessage(msg.chat.id, lines.join('\n'));
 }
 
@@ -314,10 +372,11 @@ function cmdConfess(msg, args) {
   const resp = postToChannelWithResult(ch, leadIn);
   if (!resp || !resp.ok) { sendMessage(msg.chat.id, 'Could not post. Check bot permissions in the channel.'); return; }
   const confId = (resp.result && resp.result.message_id) ? resp.result.message_id : null;
+  if (confId) rememberBotMessage_(ch, confId);
   let comment; try { comment = generateComment(text, ''); } catch (e) { console.error('cmdConfess:', e); }
   if (comment && comment.trim().length > 0) {
-    if (confId) sendMessage(ch, postCommentHtml_(comment), { replyToMessageId: confId });
-    else sendMessage(ch, postCommentHtml_(comment));
+    const cResp = confId ? sendMessage(ch, postCommentHtml_(comment), { replyToMessageId: confId }) : sendMessage(ch, postCommentHtml_(comment));
+    if (cResp && cResp.ok && cResp.result && cResp.result.message_id) rememberBotMessage_(ch, cResp.result.message_id);
   }
   sendMessage(msg.chat.id, 'Posted anonymously. And I had thoughts.');
 }
@@ -337,6 +396,7 @@ function cmdReply(msg, args) {
   let c; try { c = generateComment(topic, context); } catch (e) { console.error('cmdReply:', e); sendMessage(msg.chat.id, 'Brain short-circuited. Try again.'); return; }
   if (!c || c.trim().length === 0) { sendMessage(msg.chat.id, 'Came up blank. Try a different hint.'); return; }
   const resp = sendMessage(ch, '<b>Comment on #' + idStr + ':</b>\n\n' + escapeHtml(String(c || '')), { replyToMessageId: Number(idStr) });
+  if (resp && resp.ok && resp.result && resp.result.message_id) rememberBotMessage_(ch, resp.result.message_id);
   if (resp && resp.ok) sendMessage(msg.chat.id, 'Comment posted as reply to post #' + idStr + '.');
   else sendMessage(msg.chat.id, 'Could not post reply. Check bot permissions and message id.');
 }
@@ -400,6 +460,7 @@ function postCommentToChannel(comment) {
 function postRoastToChannel(roast) { return postCommentToChannel(roast); }
 function postToChannel(channelId, body) {
   const resp = sendMessage(channelId, body);
+  if (resp && resp.ok && resp.result && resp.result.message_id) rememberBotMessage_(channelId, resp.result.message_id);
   return !!(resp && resp.ok === true);
 }
 function postToChannelWithResult(channelId, body) {
@@ -463,18 +524,36 @@ function handleMessage(msg) {
   try {
     if (!msg || !msg.chat) { console.log('handleMessage: no chat'); try{ logUpdate_({message: msg||{}}, null, 'no_chat', null);}catch(_e){} return; }
     if (msg.from && msg.from.is_bot) { console.log('handleMessage: ignore bot'); try{ logUpdate_({message: msg}, null, 'bot_ignored', null);}catch(_e){} return; }
-    const autoReplyOn = PropertiesService.getScriptProperties().getProperty('AUTO_REPLY') === 'true';
+    const autoReplyOn = autoReplyEnabled_();
     const chId = getChannelId();
     // Channel listener: opt-in via AUTO_REPLY script property
-    if (autoReplyOn && chId && String(msg.chat.id) === String(chId) && msg.text && !(msg.from && msg.from.is_bot === true)) {
-      const trimmed = String(msg.text).trim();
-      if (trimmed.charAt(0) !== '/') {
-        if (channelReplyQuotaHit_()) {
-          console.log('listener: channel auto-reply muted (quota)');
-        } else {
-          let c; try { c = generateComment(trimmed, ''); } catch (e) { console.error('listener:', e); }
-          if (c && c.trim().length > 0) sendMessage(chId, postCommentHtml_(c), { replyToMessageId: msg.message_id });
+    if (autoReplyOn && chId && String(msg.chat.id) === String(chId)) {
+      // Never answer the bot's own comment. Telegram echoes a channel's posts back through
+      // getUpdates — including the bot's — and reports every one of them with `sender_chat`
+      // set to the CHANNEL and no `from`, so there is no field that tells them apart. Without
+      // this check the bot replies to itself, and that reply is itself a channel post.
+      if (isOwnChannelMessage_(msg.chat.id, msg.message_id)) {
+        console.log('listener: own channel post ' + msg.message_id + ' ignored');
+        try { logUpdate_({ message: msg }, null, 'own_post_ignored', null); } catch (_e) {}
+        return;
+      }
+      // `text` only — a photo/video post carries `caption`, so those are skipped.
+      if (msg.text) {
+        const trimmed = String(msg.text).trim();
+        if (trimmed.charAt(0) !== '/') {
+          if (channelReplyQuotaHit_()) {
+            console.log('listener: channel auto-reply muted (quota)');
+          } else {
+            let c; try { c = generateComment(trimmed, ''); } catch (e) { console.error('listener:', e); }
+            if (c && c.trim().length > 0) {
+              const resp = sendMessage(chId, postCommentHtml_(c), { replyToMessageId: msg.message_id });
+              if (resp && resp.ok && resp.result && resp.result.message_id) rememberBotMessage_(chId, resp.result.message_id);
+            }
+          }
         }
+      } else {
+        console.log('listener: channel post has no text (media/caption) — skipped');
+        try { logUpdate_({ message: msg }, null, 'channel_media_skipped', null); } catch (_e) {}
       }
       return;
     }
@@ -588,3 +667,133 @@ function debugDoPostHelp() {
 }
 
 function debugAll_() { testParse(); testHelpPayload_(); testHandleHelp(); debugDoPostHelp(); }
+
+/* === DIAGNOSE — run in the editor to find out why the bot is silent ===
+// Run -> diagnose, then read View -> Logs (Executions -> logs).
+// It only reads: no message is sent to any chat, no property is written.
+// Each check prints OK / PROBLEM, and the last line names the first thing to fix.
+*/
+function diagnose() {
+  const out = [];
+  function line(status, label, detail) { out.push('[' + status + '] ' + label + (detail ? ' — ' + detail : '')); }
+  const props = PropertiesService.getScriptProperties();
+  const firstProblem = { v: null };
+  function problem(label, detail, fix) {
+    line('PROBLEM', label, detail);
+    if (!firstProblem.v) firstProblem.v = fix || label;
+  }
+  function okay(label, detail) { line('OK', label, detail); }
+
+  line('INFO', 'diagnose start', new Date().toISOString());
+
+  // 1. Script properties
+  const token = props.getProperty('TELEGRAM_BOT_TOKEN');
+  const geminiKey = props.getProperty('GEMINI_API_KEY');
+  const rawChannel = props.getProperty('CONFESSION_CHANNEL_ID');
+  const rawAuto = props.getProperty('AUTO_REPLY');
+  const adminRaw = props.getProperty('ADMIN_IDS');
+
+  if (!token) problem('TELEGRAM_BOT_TOKEN is missing', 'getConfig() throws, so pollTelegram_ dies before it fetches anything', 'Set TELEGRAM_BOT_TOKEN in Script Properties.');
+  else okay('TELEGRAM_BOT_TOKEN is set', 'length ' + String(token).length + ', ends ...' + String(token).slice(-4));
+
+  if (!geminiKey) line('WARN', 'GEMINI_API_KEY is missing', 'every comment will be the fallback string');
+  else okay('GEMINI_API_KEY is set', 'length ' + String(geminiKey).length);
+
+  if (!rawChannel) problem('CONFESSION_CHANNEL_ID is not set', 'the channel listener cannot match, and /confess says "No channel configured"', 'Set CONFESSION_CHANNEL_ID, or DM the bot /setchannel <id>.');
+  else if (!/^-?\d+$/.test(String(rawChannel).trim())) problem('CONFESSION_CHANNEL_ID is not a plain number', 'value is ' + JSON.stringify(String(rawChannel)) + '; getConfig() turns any non-numeric value into null, so the channel is treated as unset', 'Use the numeric id like -1001234567890 (the @name form is rejected here).');
+  else okay('CONFESSION_CHANNEL_ID is numeric', String(rawChannel).trim());
+
+  if (rawAuto === null || rawAuto === undefined) problem('AUTO_REPLY is not set', 'the listener is off, so channel posts are ignored silently — this is the default', 'Set AUTO_REPLY to exactly true (lowercase).');
+  else if (String(rawAuto).trim().toLowerCase() !== 'true') problem('AUTO_REPLY is set but not to "true"', 'value is ' + JSON.stringify(String(rawAuto)) + '; only the exact string true enables the listener', 'Set AUTO_REPLY to exactly true (lowercase).');
+  else okay('AUTO_REPLY is on');
+
+  if (!adminRaw) line('WARN', 'ADMIN_IDS is empty', '/setchannel will refuse everyone');
+
+  // 2. Telegram reachability + identity
+  if (token) {
+    try {
+      const me = JSON.parse(UrlFetchApp.fetch(TELEGRAM_API_BASE_ + '/bot' + token + '/getMe', { muteHttpExceptions: true }).getContentText());
+      if (me.ok) okay('Telegram accepts the token', '@' + (me.result && me.result.username));
+      else problem('Telegram rejected the token', String(me.error_code) + ' ' + String(me.description), 'The token is wrong or was revoked in BotFather — copy the current token into TELEGRAM_BOT_TOKEN.');
+    } catch (e) { problem('getMe threw', String(e)); }
+  }
+
+  // 3. Webhook must be OFF — it blocks getUpdates with 409
+  if (token) {
+    try {
+      const info = JSON.parse(UrlFetchApp.fetch(TELEGRAM_API_BASE_ + '/bot' + token + '/getWebhookInfo', { muteHttpExceptions: true }).getContentText());
+      const url = info.result && info.result.url;
+      if (url) problem('A webhook is still registered', 'url=' + url + '; Telegram refuses getUpdates while a webhook is set (409 Conflict)', 'Run setupPolling() — it calls deleteWebhook() first.');
+      else okay('No webhook registered', 'polling can receive updates');
+      if (info.result && info.result.pending_update_count) line('INFO', 'pending updates waiting', String(info.result.pending_update_count));
+    } catch (e) { problem('getWebhookInfo threw', String(e)); }
+  }
+
+  // 4. The polling trigger
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const poll = triggers.filter(function (t) { return t.getHandlerFunction() === 'pollTelegram_'; });
+    if (poll.length === 0) problem('No pollTelegram_ trigger exists', 'nothing calls the bot — this alone explains total silence', 'Run setupPolling() in the editor.');
+    else if (poll.length > 1) problem('More than one pollTelegram_ trigger', 'found ' + poll.length + '; duplicate triggers cause duplicate replies', 'Run stopPolling() then setupPolling().');
+    else okay('Exactly one pollTelegram_ trigger', 'the bot is being called once a minute');
+    line('INFO', 'all project triggers', triggers.map(function (t) { return t.getHandlerFunction(); }).join(', ') || '(none)');
+  } catch (e) { problem('getProjectTriggers threw', String(e)); }
+
+  // 5. Poll offset sanity
+  const offRaw = props.getProperty('POLL_OFFSET');
+  if (!offRaw) line('INFO', 'POLL_OFFSET is unset', 'the next poll will start from 0 and drain the queue');
+  else okay('POLL_OFFSET is set', offRaw + ' (setupPolling() resets it to 0; a stale offset above the live update ids would make getUpdates return nothing forever, with no error)');
+
+  // 6. Can the bot actually POST to the channel? Read-only check.
+  if (token && rawChannel && /^-?\d+$/.test(String(rawChannel).trim())) {
+    const ch = String(rawChannel).trim();
+    try {
+      const chat = JSON.parse(UrlFetchApp.fetch(TELEGRAM_API_BASE_ + '/bot' + token + '/getChat?chat_id=' + encodeURIComponent(ch), { muteHttpExceptions: true }).getContentText());
+      if (chat.ok) {
+        okay('Channel is reachable', (chat.result && chat.result.title) + ' (' + (chat.result && chat.result.type) + ')');
+      } else {
+        problem('Cannot read the channel', String(chat.error_code) + ' ' + String(chat.description), 'Check the id, and that the bot is a member of the channel.');
+      }
+    } catch (e) { problem('getChat threw', String(e)); }
+
+    try {
+      const member = JSON.parse(UrlFetchApp.fetch(TELEGRAM_API_BASE_ + '/bot' + token + '/getChatMember?chat_id=' + encodeURIComponent(ch) + '&user_id=' + encodeURIComponent(String((token.split(':')[0]) || '0')), { muteHttpExceptions: true }).getContentText());
+      if (member.ok) {
+        const st = member.result && member.result.status;
+        if (st === 'administrator' || st === 'creator') okay('Bot is an admin in the channel', 'status=' + st);
+        else problem('Bot is NOT an admin in the channel', 'status=' + st + '; it cannot post, so every reply fails with 403', 'Add the bot to the channel as an administrator with Post Messages.');
+      } else {
+        line('WARN', 'Could not read the bot\'s channel membership', String(member.description));
+      }
+    } catch (e) { line('WARN', 'getChatMember threw', String(e)); }
+  }
+
+  // 7. The log sheet, which is the only place the bot records what it did
+  try {
+    const ss = SpreadsheetApp.openById(LOG_SHEET_ID);
+    const sh = ss.getSheetByName(LOG_SHEET_NAME);
+    if (!sh) line('WARN', 'Log sheet tab "' + LOG_SHEET_NAME + '" does not exist yet', 'it is created on the first write');
+    else {
+      const last = sh.getLastRow();
+      okay('Log sheet reachable', 'rows=' + last);
+      if (last > 1) {
+        const recent = sh.getRange(Math.max(2, last - 4), 1, Math.min(5, last - 1), 10).getValues();
+        for (let i = 0; i < recent.length; i++) {
+          line('INFO', 'log row', recent[i][0] + ' | action=' + recent[i][8] + ' | cmd=' + recent[i][7] + ' | err=' + recent[i][9]);
+        }
+      }
+    }
+  } catch (e) { line('WARN', 'Could not open the log sheet', String(e)); }
+
+  // 8. What the last run actually did
+  line('INFO', 'recent console errors', '(see Executions -> the pollTelegram_ runs)');
+
+  line('INFO', 'diagnose end');
+  // The summary must be part of the RETURNED text, not only the log: the return value is
+  // what a caller (or a test) reads, and a report that omits its own verdict is how a
+  // failing configuration gets mistaken for a clean one.
+  out.push(firstProblem.v ? '\n==> FIX THIS FIRST: ' + firstProblem.v : '\n==> No blocking problem found. If the bot is still silent, check Executions for pollTelegram_ runs and whether the deployed file matches Code.gs.');
+  const report = out.join('\n');
+  console.log(report);
+  return report;
+}
