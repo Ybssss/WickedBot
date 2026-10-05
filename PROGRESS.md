@@ -18,12 +18,19 @@
 > the offset, and it is now `0`. `node tests/run.js` → **119 assertions, 0 failed**.
 > **Live E2E is still unproven** — the log sheet still shows `rows=4`, newest `2026-09-18T02:44:24Z`,
 > so no update has yet been processed through polling. DM the bot `/start` and allow ~60 s; confirm by
-> the log sheet growing past 4 rows or by `pollTelegram_` appearing in Executions. Still outstanding:
-> **rotate the Telegram bot token** (two raw tokens sit in the pushed git history, section 5) and the
-> Gemini key exposed in chat 2026-09-02. Start with section 4 (progress), section 5 (drift), then
-> section 6 (verification baseline). Docs note (2026-09-18): the legacy "orchestrator / worker
-> role-play" framing was stripped from this file (preamble + worker-persona labels; technical facts,
-> hashes and timestamps kept).
+> the log sheet growing past 4 rows or by `pollTelegram_` appearing in Executions.
+>
+> **Secrets: CLOSED (Item 18).** Both leaked Telegram tokens were verified **revoked** — each returns
+> HTTP 401 against `getMe` — so the exposure is neutralised. The history purge had in fact **already
+> been performed** by `git filter-repo` (26 commits rewritten; `.git/filter-repo/commit-map`), and
+> local object-store plus working-tree scans are clean. The pre-rewrite commits remain retrievable
+> from GitHub by SHA until it garbage-collects; that is **harmless now the credentials are dead**.
+> Committed and pushed as `31d47be` (fast-forward, no force needed). Note that hashes quoted in
+> sections 4–5 are **pre-rewrite** and no longer resolve locally — resolve them via the commit-map.
+>
+> Start with section 4 (progress), section 5 (drift), then section 6 (verification baseline). Docs
+> note (2026-09-18): the legacy "orchestrator / worker role-play" framing was stripped from this file
+> (preamble + worker-persona labels; technical facts, hashes and timestamps kept).
 
 ---
 
@@ -502,6 +509,19 @@ committed, and is unaffected by this work. The exposed values were never printed
 old→new map is `.git/filter-repo/commit-map`. Do not `git rm` under `.git/filter-repo/`.
 **Decision(s).** D10 — confirmed correct and now satisfied: revocation was the fix, redaction/purging
 was hygiene. The exposure window was 2026-09-02/03 → 2026-10-05.
+**Committed and pushed (owner-approved).** `31d47be` on `master`, fast-forward from `ac2c036` (no
+force-push needed — the rewritten line was already what the remote served). 28 files, +2298/-57:
+`Code.gs` (Items 16–17), `PROGRESS.md`, `README.md`, the new `tests/` suite, and the code-review-graph
+config that was previously untracked. Pre-push checks: `node --check` clean, **119 assertions / 0
+failed**, secret scan of `HEAD` clean, and the pushed revision re-scanned over the network (0
+secret-shaped matches in `PROGRESS.md`, `Code.gs`, `README.md`, `AGENTS.md`, `tests/lib/gas-env.js`).
+No CI workflows exist, so the push triggered no deploy.
+**Correction to an earlier claim in this session.** The "hooks silently no-op" note was **too broad**.
+The **git** `pre-commit` hook works — Git for Windows runs hooks under its own bundled `sh.exe`
+(`C:\Program Files\Git\usr\bin\sh.exe`), which sees `code-review-graph` — and it fired during this
+commit (`Incremental: 7 files updated, 82 nodes, 772 edges`). Only the **AI-tool** hooks
+(`.claude/settings.json`, `.gemini/hooks/*.sh`) are broken, because PATH `bash` is the WSL relay with
+no distro and `python3` is absent. Section 5's drift row has been corrected to say exactly that.
 **Not done / open.** Removing the dangling pre-rewrite commits from GitHub entirely needs either a
 GitHub Support request or deleting and recreating the repo — owner's call, and **not urgent now that
 the tokens are dead**. Also noted: `.codebuddy/`, `.gemini/`, `.kiro/`, `.qoder/` were deleted from
@@ -542,8 +562,9 @@ remembered from a superseded source is unverified until re-checked.
 | Live diagnosis | `diagnose()` in the GAS editor | ✅ 2026-10-05 17:25Z found both blockers; **17:32Z clean — "No blocking problem found"** | 2026-10-05 |
 | Live polling E2E | DM `/start`, `/help`, `/comment`, `/confess`; channel post → threaded reply | ⏳ **unproven** — log sheet still `rows=4`, newest 2026-09-18T02:44:24Z | — |
 | Live webhook deploy | — | N/A — webhook path abandoned (D5); a stray armed webhook is what broke it | — |
-| Secret scan | `git grep -E "AIza[0-9A-Za-z_-]{20,}|[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}"` | 0 hits | 2026-09-15 |
-| Git state | `git status` / `git log --oneline -5` | HEAD `ac2c036`, 0 ahead of origin/master | 2026-10-05 |
+| Secret scan | `git grep -E "AIza[0-9A-Za-z_-]{20,}|[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}"` | 0 hits in `HEAD`; pushed revision re-scanned over the network: 0 | 2026-10-05 |
+| Leaked-token rotation | `getMe` against each old token | **both HTTP 401 — revoked** | 2026-10-05 |
+| Git state | `git status` / `git log --oneline -5` | clean; HEAD `31d47be` pushed, 0 ahead / 0 behind | 2026-10-05 |
 
 The regression suite executes the **real text of `Code.gs`** against stubs for PropertiesService,
 CacheService, UrlFetchApp, SpreadsheetApp, ScriptContent, ContentService and ScriptApp. It catches
